@@ -1,0 +1,24 @@
+{
+  "openai": {
+    "apiKey": "sk-REPLACE-ME",
+    "baseUrl": "https://apiproxy.work/v1",
+    "model": "gpt-5-codex"
+  },
+  "codex": {
+    "modelReasoningEffort": "medium",
+    "approvalPolicy": "never",
+    "sandboxMode": "danger-full-access",
+    "workingDirectory": null,
+    "skipGitRepoCheck": true
+  },
+  "server": {
+    "port": 3001,
+    "host": "0.0.0.0",
+    "corsOrigin": "http://localhost:5173"
+  },
+  "logging": {
+    "level": "info",
+    "file": "logs/app.log",
+    "alsoStdout": true
+  }
+}

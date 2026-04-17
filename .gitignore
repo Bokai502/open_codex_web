@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+*.local
+backend/sessions.json
+backend/config.json
+backend/logs/
+backend/skills.json
+backend/config.json
+
+.git.broken/
+.claude/settings.local.json
