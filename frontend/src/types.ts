@@ -45,6 +45,13 @@ export interface ErrorItem {
   message: string
 }
 
+export interface AskUserItem {
+  id: string
+  type: "ask_user"
+  question: string
+  options: string[]
+}
+
 export type ThreadItem =
   | AgentMessageItem
   | ReasoningItem
@@ -52,6 +59,7 @@ export type ThreadItem =
   | FileChangeItem
   | WebSearchItem
   | ErrorItem
+  | AskUserItem
 
 // 一轮完整对话
 export interface Turn {
@@ -67,6 +75,7 @@ export interface Session {
   threadId: string | null  // Codex SDK thread_id，用于 resumeThread
   turns: Turn[]
   createdAt: number     // 时间戳
+  dismissedAskUserId?: string | null
 }
 
 // 注意：SDK 使用点号命名，如 "item.started" 而非 "item_started"

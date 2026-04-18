@@ -1,11 +1,14 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react"
-import type { ThreadEvent, ThreadItem, Turn } from "../types"
+import type { AskUserItem, ThreadEvent, ThreadItem, Turn } from "../types"
 
 interface Props {
   turns: Turn[]
   currentPrompt: string
   currentEvents: ThreadEvent[]
   running: boolean
+  pendingAskUser: AskUserItem | null
+  onSubmitAskUser: (answer: string) => void
+  onStopAskUser: () => void
 }
 
 interface ItemState {
@@ -230,7 +233,7 @@ function CommandBlock({ item, done }: {
           )}
           {item.exit_code != null && (
             <span style={{ fontSize: 11, fontFamily: "var(--mono)", color: failed ? "#f87171" : "#34d399" }}>
-              {item.status === "declined" ? "blocked" : `exit ${item.exit_code}`}
+              {`exit ${item.exit_code}`}
             </span>
           )}
         </button>
@@ -286,6 +289,231 @@ function WebSearch({ query }: { query: string }) {
   )
 }
 
+function AskUserAnswerCard({
+  askUser,
+  disabled,
+  onSubmit,
+  onStop,
+}: {
+  askUser: AskUserItem
+  disabled: boolean
+  onSubmit: (answer: string) => void
+  onStop: () => void
+}) {
+  const hasOptions = askUser.options.length > 0
+  const [customOpen, setCustomOpen] = useState(!hasOptions)
+  const [customValue, setCustomValue] = useState("")
+  const [focusedIndex, setFocusedIndex] = useState(-1)
+  const optionRefs = useRef<(HTMLButtonElement | null)[]>([])
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => {
+    setCustomOpen(askUser.options.length === 0)
+    setCustomValue("")
+    setFocusedIndex(-1)
+  }, [askUser.id, askUser.options.length])
+
+  const submitAnswer = (answer: string) => {
+    const trimmed = answer.trim()
+    if (!trimmed || disabled) return
+    onSubmit(trimmed)
+  }
+
+  const handleOptionKeyDown = (e: React.KeyboardEvent, i: number) => {
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+      e.preventDefault()
+      const next = (i + 1) % askUser.options.length
+      setFocusedIndex(next)
+      optionRefs.current[next]?.focus()
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      e.preventDefault()
+      const prev = (i - 1 + askUser.options.length) % askUser.options.length
+      setFocusedIndex(prev)
+      optionRefs.current[prev]?.focus()
+    }
+  }
+
+  return (
+    <div style={{ paddingBottom: 24, animation: "fadeIn 0.18s ease forwards" }}>
+      <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+        <AIIcon />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8,
+            fontSize: 14, fontWeight: 600, marginBottom: 6, color: "var(--text)",
+          }}>
+            AI
+            <span style={{
+              display: "inline-flex", alignItems: "center", gap: 5,
+              fontSize: 11, fontWeight: 500, color: "var(--amber)",
+              padding: "2px 8px", borderRadius: 999,
+              background: "rgba(245, 158, 11, 0.1)",
+              border: "1px solid rgba(245, 158, 11, 0.25)",
+            }}>
+              <span style={{
+                width: 5, height: 5, borderRadius: "50%", background: "var(--amber)",
+                animation: "pulse 1.4s ease-in-out infinite",
+              }} />
+              等待你的回答
+            </span>
+          </div>
+
+          <div style={{
+            border: "1px solid var(--border)",
+            background: "var(--bg-2)",
+            borderRadius: 12,
+            padding: "14px 16px",
+          }}>
+            <div style={{
+              fontSize: 15,
+              lineHeight: "1.7",
+              color: "var(--text)",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+            }}>
+              {askUser.question}
+            </div>
+
+            {hasOptions && (
+              <>
+                <div style={{
+                  display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14,
+                }}>
+                  {askUser.options.map((option, i) => (
+                    <button
+                      key={option}
+                      ref={el => { optionRefs.current[i] = el }}
+                      onClick={() => submitAnswer(option)}
+                      onKeyDown={e => handleOptionKeyDown(e, i)}
+                      onFocus={() => setFocusedIndex(i)}
+                      disabled={disabled}
+                      style={{
+                        padding: "8px 14px",
+                        borderRadius: 999,
+                        border: `1px solid ${focusedIndex === i ? "var(--text)" : "var(--border-2)"}`,
+                        background: "var(--bg)",
+                        color: "var(--text)",
+                        cursor: disabled ? "default" : "pointer",
+                        fontSize: 13,
+                        lineHeight: 1.3,
+                        opacity: disabled ? 0.5 : 1,
+                        transition: "background 0.15s, border-color 0.15s",
+                      }}
+                      onMouseEnter={e => { if (!disabled) e.currentTarget.style.background = "var(--bg-3)" }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "var(--bg)" }}
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 10 }}>
+                  点击选项直接发送
+                </div>
+              </>
+            )}
+
+            <div style={{ marginTop: hasOptions ? 14 : 10 }}>
+              {hasOptions && !customOpen && (
+                <button
+                  onClick={() => {
+                    setCustomOpen(true)
+                    setTimeout(() => textareaRef.current?.focus(), 0)
+                  }}
+                  disabled={disabled}
+                  style={{
+                    background: "transparent", border: "none",
+                    padding: 0, cursor: disabled ? "default" : "pointer",
+                    fontSize: 13, color: "var(--text-2)",
+                    textDecoration: "underline",
+                    textUnderlineOffset: 3,
+                  }}
+                >
+                  ✏️ 自定义回答
+                </button>
+              )}
+
+              {customOpen && (
+                <div style={{
+                  display: "flex", gap: 8, alignItems: "flex-end",
+                }}>
+                  <textarea
+                    ref={textareaRef}
+                    value={customValue}
+                    onChange={e => setCustomValue(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault()
+                        submitAnswer(customValue)
+                      }
+                    }}
+                    disabled={disabled}
+                    placeholder={hasOptions ? "或者输入自定义回答…" : "输入你的回答…"}
+                    rows={1}
+                    style={{
+                      flex: 1,
+                      resize: "none",
+                      minHeight: 40,
+                      maxHeight: 160,
+                      borderRadius: 10,
+                      border: "1px solid var(--border)",
+                      background: "var(--bg)",
+                      padding: "10px 12px",
+                      fontFamily: "var(--font)",
+                      fontSize: 14,
+                      lineHeight: "1.6",
+                      color: "var(--text)",
+                      outline: "none",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                  <button
+                    onClick={() => submitAnswer(customValue)}
+                    disabled={disabled || !customValue.trim()}
+                    style={{
+                      padding: "10px 16px",
+                      borderRadius: 10,
+                      border: "none",
+                      background: (disabled || !customValue.trim()) ? "var(--bg-3)" : "var(--text)",
+                      color: (disabled || !customValue.trim()) ? "var(--text-3)" : "var(--bg)",
+                      cursor: (disabled || !customValue.trim()) ? "default" : "pointer",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      flexShrink: 0,
+                      transition: "background 0.15s",
+                    }}
+                  >
+                    发送
+                  </button>
+                </div>
+              )}
+
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+                <button
+                  onClick={onStop}
+                  disabled={disabled}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 10,
+                    border: "1px solid var(--border-2)",
+                    background: "transparent",
+                    color: "var(--text-2)",
+                    cursor: disabled ? "default" : "pointer",
+                    fontSize: 13,
+                    fontWeight: 500,
+                    opacity: disabled ? 0.5 : 1,
+                  }}
+                >
+                  停止对话
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── 当前轮 item（带动画）──────────────────────────────────────
 function LiveItemView({ state }: { state: ItemState }) {
   const { item, done } = state
@@ -328,7 +556,7 @@ const HistoryTurn = memo(function HistoryTurn({ turn }: { turn: Turn }) {
 })
 
 // ── 主组件 ────────────────────────────────────────────────────
-export function OutputLog({ turns, currentPrompt, currentEvents, running }: Props) {
+export function OutputLog({ turns, currentPrompt, currentEvents, running, pendingAskUser, onSubmitAskUser, onStopAskUser }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   // RAF ref：确保每帧最多触发一次滚动，避免密集事件流造成滚动抖动
   const scrollRafRef = useRef<number | null>(null)
@@ -346,7 +574,7 @@ export function OutputLog({ turns, currentPrompt, currentEvents, running }: Prop
       scrollRafRef.current = null
       bottomRef.current?.scrollIntoView({ behavior: "smooth" })
     })
-  }, [turns.length, currentEvents.length])
+  }, [turns.length, currentEvents.length, pendingAskUser?.id])
 
   // useMemo：仅在 currentEvents 引用变化（批量 flush 后）时重新计算
   const { order, map } = useMemo(() => {
@@ -399,6 +627,15 @@ export function OutputLog({ turns, currentPrompt, currentEvents, running }: Prop
         {turns.map(turn => (
           <HistoryTurn key={turn.id} turn={turn} />
         ))}
+
+        {pendingAskUser && !running && (
+          <AskUserAnswerCard
+            askUser={pendingAskUser}
+            disabled={running}
+            onSubmit={onSubmitAskUser}
+            onStop={onStopAskUser}
+          />
+        )}
 
         {/* 当前轮用户消息 */}
         {currentPrompt && <UserMessage text={currentPrompt} />}

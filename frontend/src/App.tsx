@@ -3,11 +3,25 @@ import { Sidebar } from "./components/Sidebar"
 import { TaskInput } from "./components/TaskInput"
 import { OutputLog } from "./components/OutputLog"
 import { useCodexStream } from "./hooks/useTaskStream"
-import type { ThreadEvent, Turn, Session } from "./types"
+import type { AskUserItem, ThreadEvent, Turn, Session } from "./types"
 
 // ── helpers ──────────────────────────────────────────────────────────
 function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2)
+}
+
+function getPendingAskUser(session: Session | null): AskUserItem | null {
+  const lastTurn = session?.turns[session.turns.length - 1]
+  if (!lastTurn) return null
+
+  for (let i = lastTurn.events.length - 1; i >= 0; i--) {
+    const event = lastTurn.events[i]
+    if (event.type === "item.completed" && event.item.type === "ask_user") {
+      return session?.dismissedAskUserId === event.item.id ? null : event.item
+    }
+  }
+
+  return null
 }
 
 // localStorage 作为即时读取的缓存层（同步，避免白屏）
@@ -142,6 +156,7 @@ export default function App() {
   // ── derived state ──────────────────────────────────────────────────
   const activeSession = sessions.find(s => s.id === activeSessionId) ?? null
   const turns: Turn[] = activeSession?.turns ?? []
+  const pendingAskUser = getPendingAskUser(activeSession)
 
   // ── session management ─────────────────────────────────────────────
   const handleNew = useCallback(() => {
@@ -179,6 +194,18 @@ export default function App() {
     }
   }, [activeSessionId, running, abort])
 
+  const handleStopAskUser = useCallback(() => {
+    const sid = activeSessionIdRef.current
+    if (!sid || !pendingAskUser) return
+    setSessions(prev =>
+      prev.map(s =>
+        s.id === sid
+          ? { ...s, dismissedAskUserId: pendingAskUser.id }
+          : s
+      )
+    )
+  }, [pendingAskUser])
+
   // ── submit ─────────────────────────────────────────────────────────
   const handleSubmit = useCallback((prompt: string, enabledSkills: string[] = []) => {
     let sid = activeSessionIdRef.current
@@ -192,6 +219,7 @@ export default function App() {
         threadId: null,
         turns: [],
         createdAt: Date.now(),
+        dismissedAskUserId: null,
       }
       setSessions(prev => [...prev, newSession])
       setActiveSessionId(newSession.id)
@@ -203,7 +231,10 @@ export default function App() {
       threadIdForRun = sessions.find(s => s.id === sid)?.threadId ?? null
     }
 
-    setCurrentPrompt(prompt)
+      setSessions(prev => prev.map(s =>
+        s.id === sid ? { ...s, dismissedAskUserId: null } : s
+      ))
+      setCurrentPrompt(prompt)
     setCurrentEvents([])
     currentEventsRef.current = []
     currentPromptRef.current = prompt
@@ -347,10 +378,19 @@ export default function App() {
           currentPrompt={currentPrompt}
           currentEvents={currentEvents}
           running={running}
+          pendingAskUser={pendingAskUser}
+          onSubmitAskUser={answer => handleSubmit(answer)}
+          onStopAskUser={handleStopAskUser}
         />
 
         {/* Input */}
-        <TaskInput onSubmit={handleSubmit} onAbort={abort} disabled={running} />
+        {!pendingAskUser && (
+          <TaskInput
+            onSubmit={handleSubmit}
+            onAbort={abort}
+            disabled={running}
+          />
+        )}
       </div>
     </div>
   )
