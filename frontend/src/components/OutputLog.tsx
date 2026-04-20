@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react"
 import type { AskUserItem, ThreadEvent, ThreadItem, Turn } from "../types"
+import { MarkdownText } from "./outputMarkdown"
 
 interface Props {
   turns: Turn[]
@@ -80,37 +81,6 @@ function UserMessage({ text }: { text: string }) {
   )
 }
 
-// ── 图片路径检测 ───────────────────────────────────────────────
-// 匹配 Windows 绝对路径中的图片文件，支持 / 和 \ 分隔符
-const IMAGE_PATH_RE = /([A-Za-z]:[/\\][\w/\\. -]+\.(?:png|jpg|jpeg|gif|webp|svg))/i
-
-function renderWithImages(text: string): React.ReactNode {
-  const parts = text.split(IMAGE_PATH_RE)
-  if (parts.length === 1) return text
-  return parts.map((part, i) => {
-    if (i % 2 === 1) {
-      const src = `/api/image?path=${encodeURIComponent(part)}`
-      return (
-        <span key={i} style={{ display: "block", margin: "10px 0" }}>
-          <img
-            src={src}
-            alt={part}
-            style={{ maxWidth: "100%", borderRadius: 6, display: "block" }}
-          />
-          <span style={{
-            display: "block", marginTop: 4,
-            fontSize: 11, color: "var(--text-3)", fontFamily: "var(--mono)",
-            wordBreak: "break-all",
-          }}>
-            {part}
-          </span>
-        </span>
-      )
-    }
-    return part || null
-  })
-}
-
 // ── Agent 消息（直接显示流式文本，打字机效果由 SSE 流本身提供）──
 function LiveAgentMessage({ text, done }: { text: string; done: boolean }) {
   return (
@@ -123,11 +93,9 @@ function LiveAgentMessage({ text, done }: { text: string; done: boolean }) {
             color: done ? "var(--text)" : "var(--text-2)",
             transition: "color 0.3s",
           }}>AI</div>
-          <div style={{
-            fontSize: 15, lineHeight: "1.78", color: "var(--text)",
-            whiteSpace: "pre-wrap", wordBreak: "break-word",
-          }}>
-            {renderWithImages(text)}{!done && <Cursor />}
+          <div style={{ fontSize: 15, lineHeight: "1.78", color: "var(--text)" }}>
+            <MarkdownText text={text} />
+            {!done && <Cursor />}
           </div>
         </div>
       </div>
@@ -143,11 +111,8 @@ function StaticAgentMessage({ text }: { text: string }) {
         <AIIcon />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, color: "var(--text)" }}>AI</div>
-          <div style={{
-            fontSize: 15, lineHeight: "1.78", color: "var(--text)",
-            whiteSpace: "pre-wrap", wordBreak: "break-word",
-          }}>
-            {renderWithImages(text)}
+          <div style={{ fontSize: 15, lineHeight: "1.78", color: "var(--text)" }}>
+            <MarkdownText text={text} />
           </div>
         </div>
       </div>
@@ -192,11 +157,14 @@ function ReasoningCard({ text, done, open, onToggle }: {
         </button>
         {open && (
           <div style={{
-            padding: "10px 14px", fontSize: 13, lineHeight: "1.7",
-            color: "var(--text-2)", whiteSpace: "pre-wrap",
-            wordBreak: "break-word", fontStyle: "italic",
+            padding: "10px 14px",
+            fontSize: 13,
+            lineHeight: "1.7",
+            color: "var(--text-2)",
+            fontStyle: "italic",
           }}>
-            {text}{!done && <Cursor />}
+            <MarkdownText text={text} tone="muted" />
+            {!done && <Cursor />}
           </div>
         )}
       </div>
