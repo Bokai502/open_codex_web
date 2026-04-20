@@ -43,4 +43,15 @@ describe("MarkdownText", () => {
     expect(container.querySelector("script")).toBeNull()
     expect(screen.getByText("safe")).toBeInTheDocument()
   })
+
+  it("uses a lighter background for inline code than fenced code blocks", () => {
+    render(<MarkdownText text={"Use `one` here.\n\n```ts\nconst one = 1\n```"} />)
+
+    expect(screen.getByText("one").closest("code")).toHaveStyle({
+      background: "rgba(15, 23, 42, 0.08)",
+    })
+    expect(screen.getByText("const one = 1").closest("code")).not.toHaveStyle({
+      background: "rgba(15, 23, 42, 0.08)",
+    })
+  })
 })

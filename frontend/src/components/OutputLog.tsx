@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react"
 import type { AskUserItem, ThreadEvent, ThreadItem, Turn } from "../types"
 import { MarkdownText } from "./outputMarkdown"
+import { getEventErrorMessage, shouldSuppressEvent } from "../utils/codexEventFilter"
 
 interface Props {
   turns: Turn[]
@@ -45,18 +46,10 @@ function Cursor() {
   )
 }
 
-// ── AI 头像 ────────────────────────────────────────────────────
+// ── AI Agent 头像 ────────────────────────────────────────────────────
 function AIIcon() {
   return (
-    <div style={{
-      width: 28, height: 28, borderRadius: "50%",
-      background: "var(--ai-icon)", flexShrink: 0,
-      display: "flex", alignItems: "center", justifyContent: "center",
-    }}>
-      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-        <path d="M7 1.5C7 1.5 7.8 4.2 9.5 5C11.2 5.8 13 6 13 6C13 6 11.2 6.5 9.5 7.5C7.8 8.5 7 10.5 7 10.5C7 10.5 6.2 8.5 4.5 7.5C2.8 6.5 1 6 1 6C1 6 2.8 5.8 4.5 5C6.2 4.2 7 1.5 7 1.5Z" fill="white" />
-      </svg>
-    </div>
+    <img src="/logo_1.png" style={{ width: 28, height: "auto", flexShrink: 0 }} />
   )
 }
 
@@ -92,7 +85,7 @@ function LiveAgentMessage({ text, done }: { text: string; done: boolean }) {
             fontSize: 14, fontWeight: 600, marginBottom: 6,
             color: done ? "var(--text)" : "var(--text-2)",
             transition: "color 0.3s",
-          }}>AI</div>
+          }}>AI Agent</div>
           <div style={{ fontSize: 15, lineHeight: "1.78", color: "var(--text)" }}>
             <MarkdownText text={text} />
             {!done && <Cursor />}
@@ -110,7 +103,7 @@ function StaticAgentMessage({ text }: { text: string }) {
       <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
         <AIIcon />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, color: "var(--text)" }}>AI</div>
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, color: "var(--text)" }}>AI Agent</div>
           <div style={{ fontSize: 15, lineHeight: "1.78", color: "var(--text)" }}>
             <MarkdownText text={text} />
           </div>
@@ -557,7 +550,10 @@ export function OutputLog({ turns, currentPrompt, currentEvents, running, pendin
 
   const isTurnStarted = currentEvents.some(ev => ev.type === "turn.started")
   const isDone        = currentEvents.some(ev => ev.type === "turn.completed")
-  const errorEv       = currentEvents.find(ev => ev.type === "turn.failed" || ev.type === "error")
+  const errorEv       = currentEvents.find(ev =>
+    (ev.type === "turn.failed" || ev.type === "error" || ev.type === "thread_error") &&
+    !shouldSuppressEvent(ev)
+  )
   const isEmpty       = turns.length === 0 && !currentPrompt && !running
 
   return (
@@ -575,16 +571,7 @@ export function OutputLog({ turns, currentPrompt, currentEvents, running, pendin
             alignItems: "center", justifyContent: "center",
             minHeight: "50vh", gap: 12, textAlign: "center",
           }}>
-            <div style={{
-              width: 48, height: 48, borderRadius: "50%",
-              background: "var(--ai-icon)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              marginBottom: 4,
-            }}>
-              <svg width="22" height="22" viewBox="0 0 14 14" fill="none">
-                <path d="M7 1.5C7 1.5 7.8 4.2 9.5 5C11.2 5.8 13 6 13 6C13 6 11.2 6.5 9.5 7.5C7.8 8.5 7 10.5 7 10.5C7 10.5 6.2 8.5 4.5 7.5C2.8 6.5 1 6 1 6C1 6 2.8 5.8 4.5 5C6.2 4.2 7 1.5 7 1.5Z" fill="white" />
-              </svg>
-            </div>
+            <img src="/logo_1.png" style={{ width: 80, height: "auto", marginBottom: 4 }} />
             <div style={{ fontSize: 22, fontWeight: 600, letterSpacing: "-0.02em" }}>
               How can I help you today?
             </div>
@@ -644,11 +631,7 @@ export function OutputLog({ turns, currentPrompt, currentEvents, running, pendin
           }}>
             <span>⚠</span>
             <span>
-              {"error" in errorEv
-                ? (errorEv.error as { message: string }).message
-                : "message" in errorEv
-                ? (errorEv as { message: string }).message
-                : "Unknown error"}
+              {getEventErrorMessage(errorEv) ?? "Unknown error"}
             </span>
           </div>
         )}

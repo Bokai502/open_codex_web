@@ -4,6 +4,7 @@ import { TaskInput } from "./components/TaskInput"
 import { OutputLog } from "./components/OutputLog"
 import { useCodexStream } from "./hooks/useTaskStream"
 import type { AskUserItem, ThreadEvent, Turn, Session } from "./types"
+import { shouldSuppressEvent } from "./utils/codexEventFilter"
 
 // ── helpers ──────────────────────────────────────────────────────────
 function generateId() {
@@ -245,6 +246,10 @@ export default function App() {
       threadIdForRun,
       enabledSkills,
       (event) => {
+        if (shouldSuppressEvent(event)) {
+          return
+        }
+
         // Capture the thread ID assigned by Codex SDK (uses thread_id field)
         if (event.type === "thread.started") {
           const tid = event.thread_id ?? null
@@ -347,7 +352,7 @@ export default function App() {
               fontSize: 15, fontWeight: 600,
               color: "var(--text)", letterSpacing: "-0.01em",
             }}>
-              AI
+              AI Agent
             </span>
 
             {running && (

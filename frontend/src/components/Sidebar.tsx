@@ -130,7 +130,7 @@ export function Sidebar({ sessions, activeId, onSelect, onNew, onDelete }: Props
           fontSize: 15, fontWeight: 600,
           color: "#ececf1", letterSpacing: "-0.01em",
         }}>
-          AI
+          AI Agent
         </span>
 
         {/* New chat 按钮 */}

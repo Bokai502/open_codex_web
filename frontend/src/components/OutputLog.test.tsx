@@ -55,4 +55,25 @@ describe("OutputLog markdown rendering", () => {
     expect(container.querySelector("blockquote")).not.toBeNull()
     expect(screen.getByRole("list")).toHaveTextContent("first")
   })
+
+  it("hides transient reconnect errors", () => {
+    render(
+      <OutputLog
+        turns={[]}
+        currentPrompt=""
+        currentEvents={[
+          {
+            type: "error",
+            message: "Reconnecting... 2/5 (stream disconnected before completion: websocket closed by server before response.completed)",
+          },
+        ]}
+        running={false}
+        pendingAskUser={null}
+        onSubmitAskUser={() => {}}
+        onStopAskUser={() => {}}
+      />
+    )
+
+    expect(screen.queryByText(/Reconnecting/i)).toBeNull()
+  })
 })
