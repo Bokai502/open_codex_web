@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "Bash(gh api *)",
+      "Bash(python -)",
+      "Bash(\"/c/Program Files/Google/Chrome/Application/chrome.exe\" --version)",
+      "Bash(reg query *)",
+      "Bash(powershell.exe -NoProfile -Command \"Get-ChildItem -Path 'C:\\\\\\\\Program Files\\\\\\\\Google\\\\\\\\Chrome\\\\\\\\Application','C:\\\\\\\\Program Files \\(x86\\)\\\\\\\\Google\\\\\\\\Chrome\\\\\\\\Application' -Filter chrome.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 3 -ExpandProperty FullName\")",
+      "Bash(cmd.exe /c reg query \"HKCU\\\\Software\\\\Google\\\\Chrome\\\\BLBeacon\" /v version)",
+      "Bash(cmd.exe /c reg query \"HKCU\\\\Software\\\\Microsoft\\\\Edge\\\\BLBeacon\" /v version)",
+      "Bash(powershell.exe -NoProfile -Command \"if \\(Test-Path 'C:\\\\Program Files\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe'\\) { [System.Diagnostics.FileVersionInfo]::GetVersionInfo\\('C:\\\\Program Files\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe'\\).ProductVersion }\")",
+      "Bash(npm --prefix \"d:/workspace/codex_web/frontend\" run build)"
+    ]
+  }
+}
