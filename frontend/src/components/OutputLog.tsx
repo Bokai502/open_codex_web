@@ -173,41 +173,79 @@ function CommandBlock({ item, done }: {
   const [open, setOpen] = useState(false)
   const failed = item.exit_code != null && item.exit_code !== 0
   const hasOutput = !!item.aggregated_output
+  const commandLines = item.command.split("\n")
+  const summaryLine = commandLines[0] ?? ""
+  const extraCommand = commandLines.slice(1).join("\n")
+  const hasExtraCommand = extraCommand.length > 0
+  const canExpand = hasOutput || hasExtraCommand
   return (
     <div style={{ paddingBottom: 14, paddingLeft: 42 }}>
-      <div style={{ borderRadius: 8, overflow: "hidden", background: "var(--code-bg)", fontSize: 13 }}>
-        <button onClick={() => hasOutput && setOpen(o => !o)} style={{
-          width: "100%", display: "flex", alignItems: "center", gap: 8,
+      <div style={{ borderRadius: 8, overflow: "hidden", background: "var(--code-bg)", border: "1px solid var(--border)", fontSize: 13 }}>
+        <button onClick={() => canExpand && setOpen(o => !o)} style={{
+          width: "100%", display: "flex", alignItems: "flex-start", gap: 8,
           padding: "8px 14px", background: "var(--code-header)",
-          borderBottom: open ? "1px solid rgba(255,255,255,0.06)" : "none",
-          border: "none", cursor: hasOutput ? "pointer" : "default", textAlign: "left",
+          border: "none",
+          borderBottomWidth: open ? 1 : 0,
+          borderBottomStyle: "solid",
+          borderBottomColor: "var(--border)",
+          cursor: canExpand ? "pointer" : "default", textAlign: "left",
         }}>
-          <span style={{ fontSize: 13, color: "var(--code-dim)", width: 10, flexShrink: 0 }}>
-            {hasOutput ? (open ? "▾" : "▸") : ""}
+          <span style={{ fontSize: 13, color: "var(--code-dim)", width: 10, flexShrink: 0, lineHeight: 1.5, paddingTop: 1 }}>
+            {canExpand ? (open ? "▾" : "▸") : ""}
           </span>
-          <span style={{ fontFamily: "var(--mono)", color: "var(--code-dim)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em" }}>shell</span>
-          <span style={{ fontFamily: "var(--mono)", color: "rgba(255,255,255,0.75)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {item.command}
+          <span style={{ fontFamily: "var(--mono)", color: "var(--code-dim)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em", lineHeight: 1.5, paddingTop: 2 }}>shell</span>
+          <span
+            title={item.command}
+            style={{
+              fontFamily: "var(--mono)",
+              color: "var(--code-text)",
+              flex: 1,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              lineHeight: 1.5,
+            }}
+          >
+            {summaryLine}
           </span>
           {!done && (
-            <span style={{ fontSize: 11, color: "var(--amber)", fontFamily: "var(--mono)", animation: "pulse 1.2s ease-in-out infinite" }}>running</span>
+            <span style={{ fontSize: 11, color: "var(--amber)", fontFamily: "var(--mono)", animation: "pulse 1.2s ease-in-out infinite", lineHeight: 1.5, paddingTop: 2 }}>running</span>
           )}
           {item.exit_code != null && (
-            <span style={{ fontSize: 11, fontFamily: "var(--mono)", color: failed ? "#f87171" : "#34d399" }}>
+            <span style={{ fontSize: 11, fontFamily: "var(--mono)", color: failed ? "#dc2626" : "#059669", lineHeight: 1.5, paddingTop: 2 }}>
               {`exit ${item.exit_code}`}
             </span>
           )}
         </button>
-        {open && hasOutput && (
-          <pre style={{
-            margin: 0, padding: "12px 14px",
-            fontFamily: "var(--mono)", fontSize: "12.5px", lineHeight: "1.65",
-            color: failed ? "#fca5a5" : "var(--code-text)",
-            whiteSpace: "pre-wrap", wordBreak: "break-all",
-            maxHeight: 300, overflowY: "auto",
-          }}>
-            {item.aggregated_output}
-          </pre>
+        {open && canExpand && (
+          <div>
+            {hasExtraCommand && (
+              <pre style={{
+                margin: 0,
+                padding: "12px 14px",
+                fontFamily: "var(--mono)",
+                fontSize: "12.5px",
+                lineHeight: "1.65",
+                color: "var(--code-text)",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                borderBottom: hasOutput ? "1px solid var(--border)" : "none",
+              }}>
+                {extraCommand}
+              </pre>
+            )}
+            {hasOutput && (
+              <pre style={{
+                margin: 0, padding: "12px 14px",
+                fontFamily: "var(--mono)", fontSize: "12.5px", lineHeight: "1.65",
+                color: failed ? "#b91c1c" : "var(--code-text)",
+                whiteSpace: "pre-wrap", wordBreak: "break-all",
+                maxHeight: 300, overflowY: "auto",
+              }}>
+                {item.aggregated_output}
+              </pre>
+            )}
+          </div>
         )}
       </div>
     </div>

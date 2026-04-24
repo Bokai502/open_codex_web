@@ -118,6 +118,18 @@ npm install
 
 需要同时开启两个终端。
 
+如果你想一条命令同时拉起前后端，也可以直接在项目根目录运行：
+
+```bash
+./start-dev.sh
+```
+
+如需 HTTPS 前端开发模式：
+
+```bash
+./start-dev.sh --https
+```
+
 ### 终端 1 — 后端
 
 ```bash
@@ -147,6 +159,19 @@ npm run dev
 ```
 
 打开浏览器访问 `http://localhost:5173` 即可使用。
+
+如需验证 WebGPU 等依赖安全上下文的能力，可使用 HTTPS 开发模式：
+
+```bash
+cd codex_web/frontend
+npm run dev:https
+```
+
+成功后访问 `https://localhost:5174` 或 `https://<你的局域网 IP>:5174`。首次打开时浏览器会提示本地自签名证书，信任后即可继续。
+
+后端默认 CORS 已同时放行本地 HTTP/HTTPS 开发源：
+`http://localhost:5173`、`http://127.0.0.1:5173`、`https://localhost:5174`、`https://127.0.0.1:5174`。
+如果你需要从其他域名或局域网 HTTPS 地址直连后端，再把对应 origin 加到 `backend/config.json` 的 `server.corsOrigin` 数组里即可。
 
 ### 局域网访问
 

@@ -15,7 +15,7 @@ function toMarkdownWithLocalImages(text: string) {
 export function MarkdownText({ text, tone = "primary" }: { text: string; tone?: Tone }) {
   const color = tone === "muted" ? "var(--text-2)" : "var(--text)"
   const inlineCodeBg = tone === "muted" ? "rgba(15, 23, 42, 0.05)" : "rgba(15, 23, 42, 0.08)"
-  const codeBg = tone === "muted" ? "rgba(255,255,255,0.04)" : "var(--code-bg)"
+  const codeBg = tone === "muted" ? "rgba(15, 23, 42, 0.04)" : "var(--code-bg)"
   const border = "var(--border)"
 
   return (
@@ -80,6 +80,7 @@ export function MarkdownText({ text, tone = "primary" }: { text: string; tone?: 
                 borderRadius: 8,
                 overflowX: "auto",
                 background: codeBg,
+                border: `1px solid ${border}`,
               }}
             >
               {children}

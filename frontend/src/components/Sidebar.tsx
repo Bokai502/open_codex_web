@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import type { Session } from "../types"
 
 interface Props {
@@ -7,6 +7,8 @@ interface Props {
   onSelect: (id: string) => void
   onNew: () => void
   onDelete: (id: string) => void
+  collapsed: boolean
+  onToggleCollapse: () => void
 }
 
 // ── 按日期分组 ─────────────────────────────────────────────────
@@ -104,12 +106,53 @@ function SessionItem({ session, active, onSelect, onDelete }: {
 }
 
 // ── 主组件 ────────────────────────────────────────────────────
-export function Sidebar({ sessions, activeId, onSelect, onNew, onDelete }: Props) {
+function IconButton({
+  onClick,
+  title,
+  children,
+}: {
+  onClick: () => void
+  title: string
+  children: ReactNode
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+      style={{
+        width: 32,
+        height: 32,
+        borderRadius: 6,
+        border: "none",
+        background: "transparent",
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "#8e8ea0",
+        transition: "background 0.1s, color 0.1s",
+      }}
+      onMouseEnter={e => {
+        e.currentTarget.style.background = "rgba(255,255,255,0.08)"
+        e.currentTarget.style.color = "#ececf1"
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.background = "transparent"
+        e.currentTarget.style.color = "#8e8ea0"
+      }}
+    >
+      {children}
+    </button>
+  )
+}
+
+export function Sidebar({ sessions, activeId, onSelect, onNew, onDelete, collapsed, onToggleCollapse }: Props) {
   const groups = groupByDate(sessions)
 
   return (
     <div style={{
-      width: 260,
+      width: collapsed ? 56 : 260,
       flexShrink: 0,
       height: "100vh",
       background: "#171717",
@@ -117,6 +160,7 @@ export function Sidebar({ sessions, activeId, onSelect, onNew, onDelete }: Props
       flexDirection: "column",
       borderRight: "1px solid rgba(255,255,255,0.06)",
       overflow: "hidden",
+      transition: "width 0.18s ease",
     }}>
       {/* Header */}
       <div style={{
@@ -124,107 +168,117 @@ export function Sidebar({ sessions, activeId, onSelect, onNew, onDelete }: Props
         padding: "14px 12px 8px",
         display: "flex",
         alignItems: "center",
-        justifyContent: "space-between",
+        justifyContent: collapsed ? "center" : "space-between",
       }}>
-        <span style={{
-          fontSize: 15, fontWeight: 600,
-          color: "#ececf1", letterSpacing: "-0.01em",
-        }}>
-          AI Agent
-        </span>
-
-        {/* New chat 按钮 */}
-        <button
-          onClick={onNew}
-          title="New chat"
-          style={{
-            width: 32, height: 32, borderRadius: 6,
-            border: "none", background: "transparent",
-            cursor: "pointer",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            color: "#8e8ea0",
-            transition: "background 0.1s, color 0.1s",
-          }}
-          onMouseEnter={e => {
-            e.currentTarget.style.background = "rgba(255,255,255,0.08)"
-            e.currentTarget.style.color = "#ececf1"
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.background = "transparent"
-            e.currentTarget.style.color = "#8e8ea0"
-          }}
-        >
-          {/* compose / pencil icon */}
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <path d="M2.5 13.5H5.5L13 6L10 3L2.5 10.5V13.5Z"
-              stroke="currentColor" strokeWidth="1.4"
-              strokeLinejoin="round" />
-            <path d="M10 3L13 6"
-              stroke="currentColor" strokeWidth="1.4"
-              strokeLinecap="round" />
-          </svg>
-        </button>
-      </div>
-
-      {/* Session list */}
-      <div style={{
-        flex: 1,
-        overflowY: "auto",
-        padding: "4px 8px 16px",
-      }}>
-        {/* 空状态 */}
-        {sessions.length === 0 && (
-          <div style={{
-            padding: "32px 8px",
-            textAlign: "center",
-            color: "#4a4a4f",
-            fontSize: 13,
-            lineHeight: "1.6",
+        {!collapsed && (
+          <span style={{
+            fontSize: 15, fontWeight: 600,
+            color: "#ececf1", letterSpacing: "-0.01em",
           }}>
-            No conversations yet.
-            <br />
-            Start a new chat!
-          </div>
+            AI Agent
+          </span>
         )}
 
-        {/* 分组列表 */}
-        {groups.map(group => (
-          <div key={group.label} style={{ marginBottom: 4 }}>
-            <div style={{
-              padding: "10px 10px 4px",
-              fontSize: 11, fontWeight: 600,
-              color: "#4a4a4f",
-              letterSpacing: "0.04em",
-              textTransform: "uppercase",
-            }}>
-              {group.label}
-            </div>
-            {group.items.map(s => (
-              <SessionItem
-                key={s.id}
-                session={s}
-                active={s.id === activeId}
-                onSelect={() => onSelect(s.id)}
-                onDelete={() => onDelete(s.id)}
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          {!collapsed && (
+            <IconButton onClick={onNew} title="New chat">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M2.5 13.5H5.5L13 6L10 3L2.5 10.5V13.5Z"
+                  stroke="currentColor" strokeWidth="1.4"
+                  strokeLinejoin="round" />
+                <path d="M10 3L13 6"
+                  stroke="currentColor" strokeWidth="1.4"
+                  strokeLinecap="round" />
+              </svg>
+            </IconButton>
+          )}
+          <IconButton onClick={onToggleCollapse} title={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path
+                d={collapsed ? "M6 3L10 8L6 13" : "M10 3L6 8L10 13"}
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
               />
-            ))}
-          </div>
-        ))}
-      </div>
-
-      {/* Footer */}
-      <div style={{
-        flexShrink: 0,
-        padding: "12px",
-        borderTop: "1px solid rgba(255,255,255,0.06)",
-      }}>
-        <div style={{
-          fontSize: 12, color: "#4a4a4f",
-          textAlign: "center", letterSpacing: "-0.01em",
-        }}>
-          Powered by Codex SDK
+            </svg>
+          </IconButton>
         </div>
       </div>
+
+      {collapsed ? (
+        <div style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "flex-start",
+          padding: "8px 0 16px",
+        }}>
+        </div>
+      ) : (
+        <>
+          {/* Session list */}
+          <div style={{
+            flex: 1,
+            overflowY: "auto",
+            padding: "4px 8px 16px",
+          }}>
+            {/* 空状态 */}
+            {sessions.length === 0 && (
+              <div style={{
+                padding: "32px 8px",
+                textAlign: "center",
+                color: "#4a4a4f",
+                fontSize: 13,
+                lineHeight: "1.6",
+              }}>
+                No conversations yet.
+                <br />
+                Start a new chat!
+              </div>
+            )}
+
+            {/* 分组列表 */}
+            {groups.map(group => (
+              <div key={group.label} style={{ marginBottom: 4 }}>
+                <div style={{
+                  padding: "10px 10px 4px",
+                  fontSize: 11, fontWeight: 600,
+                  color: "#4a4a4f",
+                  letterSpacing: "0.04em",
+                  textTransform: "uppercase",
+                }}>
+                  {group.label}
+                </div>
+                {group.items.map(s => (
+                  <SessionItem
+                    key={s.id}
+                    session={s}
+                    active={s.id === activeId}
+                    onSelect={() => onSelect(s.id)}
+                    onDelete={() => onDelete(s.id)}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
+
+          {/* Footer */}
+          <div style={{
+            flexShrink: 0,
+            padding: "12px",
+            borderTop: "1px solid rgba(255,255,255,0.06)",
+          }}>
+            <div style={{
+              fontSize: 12, color: "#4a4a4f",
+              textAlign: "center", letterSpacing: "-0.01em",
+            }}>
+              Powered by Codex SDK
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }

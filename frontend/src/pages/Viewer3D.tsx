@@ -1,219 +1,36 @@
-import { useEffect, useRef } from "react"
-import * as THREE from "three"
+import { useEffect, useRef, useState } from "react"
+import * as THREE from "three/webgpu"
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js"
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js"
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js"
+import {
+  ANNOTATION_PALETTES,
+  DEFAULT_ANNOTATION_HEIGHT,
+  DEFAULT_ANNOTATION_WIDTH,
+  collectComponentRoots,
+  createAnnotationLabel,
+  distributeLabelTops,
+  measureAnnotationLabel,
+  resolveComponentLabel,
+} from "./viewer3d/annotations"
+import {
+  fetchResolvedModel,
+  buildViewerModelSource,
+  getModelDisplayName,
+  getModelVersion,
+} from "./viewer3d/modelSource"
+import { applyTransparency, disposeModelResources, loadGltf } from "./viewer3d/modelUtils"
+import type { Disposable, PartAnnotation, ResolvedModel, WebGPURendererRuntime } from "./viewer3d/types"
 
-type AnnotationPalette = {
-  dot: string
-  line: string
-  text: string
-  tint: string
-}
-
-type PartAnnotation = {
-  anchorWorld: THREE.Vector3
-  dotEl: SVGCircleElement
-  id: string
-  labelEl: HTMLDivElement
-  lineEl: SVGPolylineElement
-  palette: AnnotationPalette
-}
-
-const ANNOTATION_PALETTES: AnnotationPalette[] = [
-  {
-    dot: "#a995ff",
-    line: "rgba(169, 149, 255, 0.72)",
-    text: "#7366cf",
-    tint: "rgba(245, 241, 255, 0.94)",
-  },
-  {
-    dot: "#e3b070",
-    line: "rgba(227, 176, 112, 0.7)",
-    text: "#b67d42",
-    tint: "rgba(255, 248, 238, 0.94)",
-  },
-  {
-    dot: "#bcc5df",
-    line: "rgba(188, 197, 223, 0.64)",
-    text: "#606a88",
-    tint: "rgba(248, 249, 253, 0.94)",
-  },
-]
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value))
-}
-
-function isMeshObject(node: THREE.Object3D) {
-  return (node as THREE.Mesh).isMesh === true
-}
-
-function hasRenderableDescendant(node: THREE.Object3D) {
-  let renderable = false
-
-  node.traverse((child) => {
-    if (renderable) return
-    if (isMeshObject(child)) {
-      renderable = true
-    }
-  })
-
-  return renderable
-}
-
-function findComponentContainerRoot(root: THREE.Object3D) {
-  let current = root
-
-  while (
-    current.children.length === 1 &&
-    !isMeshObject(current.children[0]) &&
-    !isMeshObject(current)
-  ) {
-    current = current.children[0]
-  }
-
-  return current
-}
-
-function normalizeComponentLabel(name: string) {
-  return name
-    .replace(/(?:[_\s-]+)?(part|component|group)$/i, "")
-    .trim()
-}
-
-function resolveComponentLabel(componentRoot: THREE.Object3D) {
-  const rootLabel = normalizeComponentLabel(componentRoot.name)
-  if (rootLabel) return rootLabel
-
-  if (componentRoot.children.length === 1) {
-    const childLabel = normalizeComponentLabel(componentRoot.children[0].name)
-    if (childLabel) return childLabel
-  }
-
-  const namedDescendant = componentRoot.children.find((child) =>
-    hasRenderableDescendant(child) && child.name.trim().length > 0,
-  )
-  if (namedDescendant) return normalizeComponentLabel(namedDescendant.name)
-
-  return ""
-}
-
-function collectComponentRoots(root: THREE.Object3D) {
-  const containerRoot = findComponentContainerRoot(root)
-  const componentRoots = containerRoot.children.filter((child) =>
-    hasRenderableDescendant(child),
-  )
-
-  if (componentRoots.length > 0) return componentRoots
-  return hasRenderableDescendant(containerRoot) ? [containerRoot] : []
-}
-
-function distributeLabelTops(
-  items: Array<{ desiredTop: number; height: number }>,
-  safeTop: number,
-  safeBottom: number,
-  gap: number,
-) {
-  if (items.length === 0) return []
-
-  const tops: number[] = []
-  let cursor = safeTop
-
-  for (const item of items) {
-    const maxTop = safeBottom - item.height
-    const desiredTop = clamp(item.desiredTop, safeTop, maxTop)
-    const nextTop = Math.max(desiredTop, cursor)
-    tops.push(nextTop)
-    cursor = nextTop + item.height + gap
-  }
-
-  const lastIndex = tops.length - 1
-  const overflow = tops[lastIndex] + items[lastIndex].height - safeBottom
-
-  if (overflow > 0) {
-    tops[lastIndex] -= overflow
-
-    for (let index = tops.length - 2; index >= 0; index -= 1) {
-      const maxTop = tops[index + 1] - items[index].height - gap
-      tops[index] = Math.min(tops[index], maxTop)
-    }
-
-    if (tops[0] < safeTop) {
-      const shift = safeTop - tops[0]
-      for (let index = 0; index < tops.length; index += 1) {
-        tops[index] += shift
-      }
-    }
-  }
-
-  return tops.map((top, index) =>
-    clamp(top, safeTop, safeBottom - items[index].height),
-  )
-}
-
-function createAnnotationLabel(id: string, palette: AnnotationPalette) {
-  const labelEl = document.createElement("div")
-  labelEl.style.position = "absolute"
-  labelEl.style.display = "flex"
-  labelEl.style.alignItems = "center"
-  labelEl.style.gap = "8px"
-  labelEl.style.padding = "5px 10px"
-  labelEl.style.border = "1px solid rgba(214, 220, 238, 0.92)"
-  labelEl.style.borderLeft = `3px solid ${palette.dot}`
-  labelEl.style.borderRadius = "4px"
-  labelEl.style.background = palette.tint
-  labelEl.style.boxShadow = "0 10px 34px rgba(12, 18, 40, 0.18)"
-  labelEl.style.backdropFilter = "blur(6px)"
-  labelEl.style.pointerEvents = "none"
-  labelEl.style.userSelect = "none"
-  labelEl.style.whiteSpace = "nowrap"
-  labelEl.style.transform = "translate(-9999px, -9999px)"
-  labelEl.style.opacity = "0"
-
-  const capEl = document.createElement("span")
-  capEl.style.width = "7px"
-  capEl.style.height = "7px"
-  capEl.style.borderRadius = "999px"
-  capEl.style.background = palette.dot
-  capEl.style.boxShadow = `0 0 0 5px ${palette.line.replace("0.72", "0.14").replace("0.7", "0.14").replace("0.64", "0.14")}`
-  labelEl.appendChild(capEl)
-
-  const textEl = document.createElement("span")
-  textEl.textContent = id
-  textEl.style.color = palette.text
-  textEl.style.fontFamily = "\"IBM Plex Mono\", \"SFMono-Regular\", Consolas, monospace"
-  textEl.style.fontSize = "12px"
-  textEl.style.fontWeight = "700"
-  textEl.style.letterSpacing = "0.18em"
-  textEl.style.textTransform = "uppercase"
-  labelEl.appendChild(textEl)
-
-  return labelEl
-}
-
-function applyTransparency(material: THREE.Material, opacity = 0.2) {
-  material.transparent = true
-  material.opacity = opacity
-  material.depthWrite = false
-  material.side = THREE.DoubleSide
-
-  if (
-    material instanceof THREE.MeshStandardMaterial ||
-    material instanceof THREE.MeshPhysicalMaterial
-  ) {
-    material.roughness = Math.min(material.roughness, 0.35)
-    material.metalness = Math.max(material.metalness, 0.05)
-    material.envMapIntensity = 1.8
-  }
-
-  material.needsUpdate = true
-}
+const MAX_DEVICE_PIXEL_RATIO = 2
 
 export default function Viewer3D() {
   const mountRef = useRef<HTMLDivElement>(null)
   const annotationSvgRef = useRef<SVGSVGElement>(null)
   const annotationLabelsRef = useRef<HTMLDivElement>(null)
+  const [modelInfo, setModelInfo] = useState<ResolvedModel | null>(null)
+  const [statusMessage, setStatusMessage] = useState("Resolving FreeCAD geometry...")
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   useEffect(() => {
     const mount = mountRef.current
@@ -222,83 +39,25 @@ export default function Viewer3D() {
 
     if (!mount || !annotationSvg || !annotationLabels) return
 
-    const width = mount.clientWidth
-    const height = mount.clientHeight
-
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false })
-    renderer.setPixelRatio(window.devicePixelRatio)
-    renderer.setSize(width, height)
-    renderer.shadowMap.enabled = true
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap
-    renderer.outputColorSpace = THREE.SRGBColorSpace
-    renderer.toneMapping = THREE.ACESFilmicToneMapping
-    renderer.toneMappingExposure = 1.4
-    mount.appendChild(renderer.domElement)
-
-    const scene = new THREE.Scene()
-    scene.background = new THREE.Color(0x0d0d1a)
-
-    const pmrem = new THREE.PMREMGenerator(renderer)
-    pmrem.compileEquirectangularShader()
-    const envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
-    scene.environment = envTex
-    pmrem.dispose()
-
-    scene.fog = new THREE.FogExp2(0x0d0d1a, 0.018)
-
-    const camera = new THREE.PerspectiveCamera(45, width / height, 0.01, 1000)
-    camera.position.set(3, 2, 5)
-
-    const keyLight = new THREE.DirectionalLight(0xfff4e0, 2.0)
-    keyLight.position.set(6, 12, 8)
-    keyLight.castShadow = true
-    keyLight.shadow.mapSize.set(2048, 2048)
-    keyLight.shadow.bias = -0.0005
-    keyLight.shadow.camera.near = 0.5
-    keyLight.shadow.camera.far = 80
-    keyLight.shadow.camera.left = -10
-    keyLight.shadow.camera.right = 10
-    keyLight.shadow.camera.top = 10
-    keyLight.shadow.camera.bottom = -10
-    scene.add(keyLight)
-
-    const fillLight = new THREE.DirectionalLight(0x7ecfff, 0.8)
-    fillLight.position.set(-8, 4, -6)
-    scene.add(fillLight)
-
-    const rimLight = new THREE.DirectionalLight(0xffffff, 1.0)
-    rimLight.position.set(0, -4, -10)
-    scene.add(rimLight)
-
-    const ambient = new THREE.AmbientLight(0xffffff, 0.25)
-    scene.add(ambient)
-
-    const pointA = new THREE.PointLight(0x4488ff, 3.0, 15)
-    pointA.position.set(-2, 3, 2)
-    scene.add(pointA)
-
-    const pointB = new THREE.PointLight(0xff6644, 2.0, 12)
-    pointB.position.set(3, 1, -2)
-    scene.add(pointB)
-
-    const grid = new THREE.GridHelper(30, 60, 0x223355, 0x111833)
-    scene.add(grid)
-
-    const controls = new OrbitControls(camera, renderer.domElement)
-    controls.enableDamping = true
-    controls.dampingFactor = 0.06
-    controls.minDistance = 0.3
-    controls.maxDistance = 150
-
-    let loadingMesh: THREE.Mesh | null = new THREE.Mesh(
-      new THREE.TorusGeometry(0.4, 0.05, 8, 48),
-      new THREE.MeshBasicMaterial({ color: 0x4fc3f7 }),
-    )
-    scene.add(loadingMesh)
-
+    let disposed = false
+    let renderer: WebGPURendererRuntime | null = null
+    let controls: OrbitControls | null = null
+    let domElement: HTMLCanvasElement | null = null
+    let modelRoot: THREE.Object3D | null = null
+    let loadingMesh: THREE.Mesh | null = null
+    let currentModelVersion: string | null = null
+    let modelRefreshInFlight = false
+    let lookupInterval: ReturnType<typeof setInterval> | null = null
+    const modelRequest = new AbortController()
+    const disposableResources: Disposable[] = []
     const annotations: PartAnnotation[] = []
     const screenPoint = new THREE.Vector3()
     const cameraSpacePoint = new THREE.Vector3()
+    let annotationsNeedLayout = false
+
+    const markAnnotationsDirty = () => {
+      annotationsNeedLayout = true
+    }
 
     const hideAnnotation = (annotation: PartAnnotation) => {
       annotation.labelEl.style.opacity = "0"
@@ -309,15 +68,40 @@ export default function Viewer3D() {
 
     const clearAnnotations = () => {
       annotations.splice(0, annotations.length)
+      annotationsNeedLayout = false
       annotationLabels.replaceChildren()
       annotationSvg.replaceChildren()
     }
 
-    const layoutAnnotations = () => {
-      if (annotations.length === 0) return
+    const refreshAnnotationMeasurements = () => {
+      annotations.forEach((annotation) => {
+        const { height, width } = measureAnnotationLabel(annotation.labelEl)
+        annotation.height = height
+        annotation.width = width
+      })
+      markAnnotationsDirty()
+    }
+
+    const syncCameraForAnnotations = (camera: THREE.PerspectiveCamera) => {
+      camera.updateMatrixWorld(true)
+    }
+
+    const layoutAnnotations = (
+      camera: THREE.PerspectiveCamera,
+      force = false,
+    ) => {
+      if (!force && !annotationsNeedLayout) return
+      if (annotations.length === 0) {
+        annotationsNeedLayout = false
+        return
+      }
 
       const viewportWidth = mount.clientWidth
       const viewportHeight = mount.clientHeight
+      if (viewportWidth <= 0 || viewportHeight <= 0) return
+
+      syncCameraForAnnotations(camera)
+
       const safeTop = 86
       const safeBottom = viewportHeight - 28
       const sidePadding = 26
@@ -344,17 +128,13 @@ export default function Viewer3D() {
             return null
           }
 
-          const bounds = annotation.labelEl.getBoundingClientRect()
-          const labelWidth = bounds.width || 84
-          const labelHeight = bounds.height || 28
-
           return {
             annotation,
-            height: labelHeight,
+            height: annotation.height,
             side: cameraSpacePoint.x < 0 ? "left" as const : "right" as const,
             screenX: (screenPoint.x * 0.5 + 0.5) * viewportWidth,
             screenY: (-screenPoint.y * 0.5 + 0.5) * viewportHeight,
-            width: labelWidth,
+            width: annotation.width,
           }
         })
         .filter((item): item is NonNullable<typeof item> => item !== null)
@@ -411,9 +191,13 @@ export default function Viewer3D() {
 
       applyLayout(leftItems, "left")
       applyLayout(rightItems, "right")
+      annotationsNeedLayout = false
     }
 
-    const buildAnnotations = (model: THREE.Object3D) => {
+    const buildAnnotations = (
+      model: THREE.Object3D,
+      camera: THREE.PerspectiveCamera,
+    ) => {
       clearAnnotations()
       model.updateWorldMatrix(true, true)
 
@@ -463,28 +247,146 @@ export default function Viewer3D() {
           annotations.push({
             anchorWorld,
             dotEl,
-            id: component.label,
+            height: DEFAULT_ANNOTATION_HEIGHT,
             labelEl,
             lineEl,
-            palette,
+            width: DEFAULT_ANNOTATION_WIDTH,
           })
         })
 
-      layoutAnnotations()
+      refreshAnnotationMeasurements()
+      layoutAnnotations(camera, true)
     }
 
-    const loader = new GLTFLoader()
-    loader.load(
-      "/models/test3.glb",
-      (gltf) => {
+    const init = async () => {
+      const modelSource = buildViewerModelSource()
+      if (!modelSource) {
+        setErrorMessage("Viewer model source is unavailable.")
+        setStatusMessage("")
+        return
+      }
+
+      const width = mount.clientWidth
+      const height = mount.clientHeight
+
+      const nextRenderer = new THREE.WebGPURenderer({ antialias: true, alpha: false }) as unknown as WebGPURendererRuntime
+      renderer = nextRenderer
+      await nextRenderer.init()
+
+      if (nextRenderer.backend?.isWebGLBackend) {
+        console.info("Viewer3D renderer fallback: WebGPU unavailable in current context, running with WebGL2 backend.")
+      }
+
+      if (disposed) {
+        nextRenderer.dispose()
+        return
+      }
+
+      nextRenderer.setPixelRatio(
+        Math.min(window.devicePixelRatio || 1, MAX_DEVICE_PIXEL_RATIO),
+      )
+      nextRenderer.setSize(width, height)
+      nextRenderer.shadowMap.enabled = true
+      nextRenderer.shadowMap.type = THREE.PCFSoftShadowMap
+      nextRenderer.outputColorSpace = THREE.SRGBColorSpace
+      nextRenderer.toneMapping = THREE.ACESFilmicToneMapping
+      nextRenderer.toneMappingExposure = 0.88
+      domElement = nextRenderer.domElement
+      mount.appendChild(nextRenderer.domElement)
+
+      const scene = new THREE.Scene()
+      scene.background = new THREE.Color(0x050914)
+
+      const pmrem = new THREE.PMREMGenerator(nextRenderer as unknown as THREE.WebGLRenderer)
+      pmrem.compileEquirectangularShader()
+      const envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+      scene.environment = envTex
+      scene.fog = new THREE.FogExp2(0x050914, 0.016)
+      disposableResources.push(pmrem, envTex)
+
+      const camera = new THREE.PerspectiveCamera(45, width / height, 0.01, 1000)
+      camera.position.set(3, 2, 5)
+
+      const keyLight = new THREE.DirectionalLight(0x8fbaff, 0.72)
+      keyLight.position.set(6, 12, 8)
+      keyLight.castShadow = true
+      keyLight.shadow.mapSize.set(2048, 2048)
+      keyLight.shadow.bias = -0.0005
+      keyLight.shadow.camera.near = 0.5
+      keyLight.shadow.camera.far = 80
+      keyLight.shadow.camera.left = -10
+      keyLight.shadow.camera.right = 10
+      keyLight.shadow.camera.top = 10
+      keyLight.shadow.camera.bottom = -10
+      scene.add(keyLight)
+
+      const fillLight = new THREE.DirectionalLight(0x3c6db6, 0.24)
+      fillLight.position.set(-8, 4, -6)
+      scene.add(fillLight)
+
+      const rimLight = new THREE.DirectionalLight(0x6d87bb, 0.22)
+      rimLight.position.set(0, -4, -10)
+      scene.add(rimLight)
+
+      const ambient = new THREE.AmbientLight(0x4c618a, 0.08)
+      scene.add(ambient)
+
+      const pointA = new THREE.PointLight(0x2f62c9, 0.8, 14)
+      pointA.position.set(-2, 3, 2)
+      scene.add(pointA)
+
+      const pointB = new THREE.PointLight(0x2f8bb8, 0.42, 11)
+      pointB.position.set(3, 1, -2)
+      scene.add(pointB)
+
+      const grid = new THREE.GridHelper(30, 60, 0x1d3f80, 0x0b1630)
+      scene.add(grid)
+
+      controls = new OrbitControls(camera, nextRenderer.domElement)
+      controls.enableDamping = true
+      controls.dampingFactor = 0.06
+      controls.minDistance = 0.3
+      controls.maxDistance = 150
+      controls.addEventListener("change", markAnnotationsDirty)
+
+      loadingMesh = new THREE.Mesh(
+        new THREE.TorusGeometry(0.4, 0.05, 8, 48),
+        new THREE.MeshBasicMaterial({ color: 0x4fc3f7 }),
+      )
+      scene.add(loadingMesh)
+      disposableResources.push(loadingMesh.geometry, loadingMesh.material as THREE.Material)
+
+      const loader = new GLTFLoader()
+
+      const loadResolvedModel = async (resolvedModel: ResolvedModel, phase: "initial" | "refresh") => {
+        const nextModelVersion = getModelVersion(resolvedModel)
+
+        if (nextModelVersion === currentModelVersion) {
+          return
+        }
+
+        setErrorMessage(null)
+        setModelInfo(resolvedModel)
+        setStatusMessage(phase === "initial" ? "Loading GLB..." : "Refreshing geometry...")
+
+        const gltf = await loadGltf(loader, resolvedModel.modelUrl)
+
+        if (disposed) return
+
         if (loadingMesh) {
           scene.remove(loadingMesh)
-          loadingMesh.geometry.dispose()
-          ;(loadingMesh.material as THREE.Material).dispose()
           loadingMesh = null
         }
 
+        if (modelRoot) {
+          scene.remove(modelRoot)
+          disposeModelResources(modelRoot)
+          modelRoot = null
+        }
+        clearAnnotations()
+
         const model = gltf.scene
+        modelRoot = model
 
         model.traverse((node) => {
           const mesh = node as THREE.Mesh
@@ -506,7 +408,7 @@ export default function Viewer3D() {
         const size = box.getSize(new THREE.Vector3())
         const center = box.getCenter(new THREE.Vector3())
         const maxDim = Math.max(size.x, size.y, size.z)
-        const scale = 3.5 / maxDim
+        const scale = maxDim > 0 ? 3.5 / maxDim : 1
         model.scale.setScalar(scale)
         model.position.sub(center.multiplyScalar(scale))
 
@@ -514,11 +416,10 @@ export default function Viewer3D() {
         model.position.y -= groundedBox.min.y
 
         scene.add(model)
-        buildAnnotations(model)
 
         const sphere = new THREE.Sphere()
         new THREE.Box3().setFromObject(model).getBoundingSphere(sphere)
-        const radius = sphere.radius
+        const radius = Math.max(sphere.radius, 0.2)
         const sphereCenter = sphere.center
 
         pointA.position.set(
@@ -537,58 +438,144 @@ export default function Viewer3D() {
           sphereCenter.y + radius * 1.4,
           sphereCenter.z + radius * 2.2,
         )
-        controls.target.copy(sphereCenter)
-        controls.update()
-        layoutAnnotations()
-      },
-      undefined,
-      (error) => {
-        console.error("GLB load error:", error)
-      },
-    )
+        controls?.target.copy(sphereCenter)
+        controls?.update()
 
-    let animationFrameId = 0
-    const clock = new THREE.Clock()
-
-    const animate = () => {
-      animationFrameId = requestAnimationFrame(animate)
-      const elapsed = clock.getElapsedTime()
-
-      if (loadingMesh) {
-        loadingMesh.rotation.z += 0.04
+        buildAnnotations(model, camera)
+        currentModelVersion = nextModelVersion
+        setStatusMessage("")
       }
 
-      pointA.intensity = 3.0 + Math.sin(elapsed * 1.2) * 0.8
-      pointB.intensity = 2.0 + Math.sin(elapsed * 0.9 + 1.5) * 0.6
+      const resolveLatestModel = async (phase: "initial" | "refresh") => {
+        const resolvedModel = await fetchResolvedModel(modelSource, modelRequest.signal)
+        if (!resolvedModel) {
+          if (phase === "initial") {
+            throw new Error("Unable to resolve a FreeCAD GLB artifact.")
+          }
+          return
+        }
 
-      controls.update()
-      renderer.render(scene, camera)
-      layoutAnnotations()
+        if (disposed) return
+
+        await loadResolvedModel(resolvedModel, phase)
+      }
+
+      const clock = new THREE.Clock()
+      const syncViewport = () => {
+        const nextWidth = mount.clientWidth
+        const nextHeight = mount.clientHeight
+        if (nextWidth <= 0 || nextHeight <= 0) return
+
+        camera.aspect = nextWidth / nextHeight
+        camera.updateProjectionMatrix()
+        nextRenderer.setPixelRatio(
+          Math.min(window.devicePixelRatio || 1, MAX_DEVICE_PIXEL_RATIO),
+        )
+        nextRenderer.setSize(nextWidth, nextHeight)
+        refreshAnnotationMeasurements()
+        layoutAnnotations(camera, true)
+      }
+
+      const resizeObserver = new ResizeObserver(() => {
+        syncViewport()
+      })
+      resizeObserver.observe(mount)
+
+      document.fonts?.ready.then(() => {
+        if (disposed) return
+        refreshAnnotationMeasurements()
+        layoutAnnotations(camera, true)
+      })
+
+      nextRenderer.setAnimationLoop(() => {
+        if (disposed) return
+
+        const elapsed = clock.getElapsedTime()
+
+        if (loadingMesh) {
+          loadingMesh.rotation.z += 0.04
+        }
+
+        pointA.intensity = 0.8 + Math.sin(elapsed * 1.2) * 0.12
+        pointB.intensity = 0.42 + Math.sin(elapsed * 0.9 + 1.5) * 0.08
+
+        controls?.update()
+        nextRenderer.render(scene, camera)
+        layoutAnnotations(camera)
+      })
+
+      const refreshLatestModel = (phase: "initial" | "refresh") => {
+        if (modelRefreshInFlight) return
+        modelRefreshInFlight = true
+        void resolveLatestModel(phase)
+          .catch((error: unknown) => {
+            if (disposed) return
+            if (phase === "initial") {
+              setStatusMessage(modelSource.autoRefresh ? "Waiting for geometry_after.glb..." : "")
+              setErrorMessage(
+                modelSource.autoRefresh
+                  ? null
+                  : error instanceof Error ? error.message : "Unable to resolve a FreeCAD GLB artifact.",
+              )
+            } else {
+              console.error("Viewer3D auto-refresh error:", error)
+            }
+          })
+          .finally(() => {
+            modelRefreshInFlight = false
+          })
+      }
+
+      refreshLatestModel("initial")
+
+      if (modelSource.autoRefresh) {
+        lookupInterval = setInterval(() => {
+          refreshLatestModel("refresh")
+        }, 3000)
+      }
+
+      return () => {
+        resizeObserver.disconnect()
+        controls?.removeEventListener("change", markAnnotationsDirty)
+        if (lookupInterval) {
+          clearInterval(lookupInterval)
+          lookupInterval = null
+        }
+      }
     }
 
-    animate()
+    let disposeResize: (() => void) | undefined
 
-    const onResize = () => {
-      const nextWidth = mount.clientWidth
-      const nextHeight = mount.clientHeight
-      camera.aspect = nextWidth / nextHeight
-      camera.updateProjectionMatrix()
-      renderer.setSize(nextWidth, nextHeight)
-      layoutAnnotations()
-    }
-
-    window.addEventListener("resize", onResize)
+    init()
+      .then((cleanup) => {
+        if (disposed) {
+          cleanup?.()
+          return
+        }
+        disposeResize = cleanup
+      })
+      .catch((error: unknown) => {
+        if (disposed) return
+        console.error("Viewer3D init error:", error)
+        setErrorMessage(error instanceof Error ? error.message : "Viewer initialization failed.")
+        setStatusMessage("")
+      })
 
     return () => {
-      window.removeEventListener("resize", onResize)
-      cancelAnimationFrame(animationFrameId)
+      disposed = true
+      modelRequest.abort()
+      disposeResize?.()
       clearAnnotations()
-      controls.dispose()
-      envTex.dispose()
-      renderer.dispose()
+      controls?.dispose()
+      renderer?.setAnimationLoop(null)
+      if (lookupInterval) clearInterval(lookupInterval)
+      disposeModelResources(modelRoot)
 
-      if (mount.contains(renderer.domElement)) {
-        mount.removeChild(renderer.domElement)
+      disposableResources.forEach((resource) => resource.dispose())
+      renderer?.dispose()
+
+      if (mount && domElement && mount.contains(domElement)) {
+        mount.removeChild(domElement)
       }
     }
   }, [])
@@ -598,7 +585,7 @@ export default function Viewer3D() {
       style={{
         width: "100vw",
         height: "100vh",
-        background: "#0d0d1a",
+        background: "radial-gradient(circle at top, #0a1730 0%, #050914 52%, #03050d 100%)",
         position: "relative",
         overflow: "hidden",
       }}
@@ -640,55 +627,83 @@ export default function Viewer3D() {
           right: 0,
           display: "flex",
           alignItems: "center",
-          justifyContent: "space-between",
           padding: "12px 20px",
           background:
-            "linear-gradient(to bottom, rgba(5, 5, 20, 0.88), rgba(5, 5, 20, 0.24), transparent)",
+            "linear-gradient(to bottom, rgba(3, 8, 20, 0.94), rgba(3, 8, 20, 0.38), transparent)",
           pointerEvents: "none",
         }}
       >
         <div style={{ display: "grid", gap: 4 }}>
           <span
             style={{
-              color: "#c8d8ff",
+              color: "#b6cdfd",
               fontFamily: "\"Space Grotesk\", system-ui, sans-serif",
               fontSize: 15,
               fontWeight: 700,
               letterSpacing: "0.06em",
             }}
-          >
-            Mesh CAD File
+            >
+            {getModelDisplayName(modelInfo)}
           </span>
           <span
             style={{
-              color: "rgba(200, 216, 255, 0.62)",
+              color: "rgba(145, 172, 226, 0.62)",
               fontFamily: "\"IBM Plex Mono\", Consolas, monospace",
               fontSize: 11,
               letterSpacing: "0.14em",
               textTransform: "uppercase",
             }}
           >
-            Part Index Overlay
+            {modelInfo?.runId || "Part Index Overlay"}
           </span>
         </div>
+      </div>
 
-        <a
-          href="/"
+      {(statusMessage || errorMessage) && (
+        <div
           style={{
-            color: "#90caf9",
-            fontFamily: "system-ui",
-            fontSize: 13,
-            textDecoration: "none",
-            pointerEvents: "auto",
-            padding: "4px 12px",
-            borderRadius: 6,
-            border: "1px solid rgba(144, 202, 249, 0.3)",
-            background: "rgba(0, 0, 0, 0.35)",
+            position: "absolute",
+            top: 72,
+            left: 20,
+            display: "grid",
+            gap: 6,
+            maxWidth: 520,
+            padding: "12px 14px",
+            borderRadius: 12,
+            background: "rgba(6, 12, 27, 0.66)",
+            border: "1px solid rgba(92, 126, 188, 0.24)",
+            backdropFilter: "blur(10px)",
+            color: "#c9dbff",
+            pointerEvents: "none",
           }}
         >
-          Back
-        </a>
-      </div>
+          {statusMessage && (
+            <span
+              style={{
+                fontFamily: "\"IBM Plex Mono\", Consolas, monospace",
+                fontSize: 12,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                color: "rgba(152, 183, 235, 0.74)",
+              }}
+            >
+              {statusMessage}
+            </span>
+          )}
+          {errorMessage && (
+            <span
+              style={{
+                fontFamily: "\"IBM Plex Sans\", system-ui, sans-serif",
+                fontSize: 13,
+                lineHeight: 1.45,
+                color: "#ffb4b4",
+              }}
+            >
+              {errorMessage}
+            </span>
+          )}
+        </div>
+      )}
 
       <div
         style={{
@@ -696,11 +711,11 @@ export default function Viewer3D() {
           bottom: 16,
           left: "50%",
           transform: "translateX(-50%)",
-          color: "rgba(180, 200, 255, 0.56)",
+          color: "rgba(126, 154, 208, 0.62)",
           fontFamily: "\"IBM Plex Mono\", Consolas, monospace",
           fontSize: 12,
           letterSpacing: "0.08em",
-          background: "rgba(0, 0, 0, 0.3)",
+          background: "rgba(5, 10, 22, 0.48)",
           padding: "6px 16px",
           borderRadius: 20,
           pointerEvents: "none",

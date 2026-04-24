@@ -6,7 +6,9 @@ export function useCodexStream() {
 
   const run = useCallback(async (
     prompt: string,
+    sessionId: string,
     threadId: string | null,
+    turnId: string,
     enabledSkills: string[],
     onEvent: (event: ThreadEvent) => void,
     onDone: () => void
@@ -28,7 +30,7 @@ export function useCodexStream() {
       const res = await fetch("/api/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, threadId, enabledSkills }),
+        body: JSON.stringify({ prompt, sessionId, threadId, turnId, enabledSkills }),
         signal: controller.signal,
       })
 

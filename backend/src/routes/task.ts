@@ -31,11 +31,30 @@ interface AskUserPayload {
   options: string[]
 }
 
-function buildPrompt(prompt: string, skillNames: string[]) {
+interface RunContext {
+  sessionId: string
+  threadId: string | null
+  turnId: string
+}
+
+function buildPrompt(prompt: string, skillNames: string[], context: RunContext) {
   const skillPrefix = skillNames.length > 0
     ? `Please use the following skills if applicable: ${skillNames.join(", ")}.\n\n`
     : ""
-  return `${ASK_USER_PROTOCOL}\n\n${skillPrefix}${prompt.trim()}`
+  const executionContext = [
+    "Execution context:",
+    `- session_id: ${context.sessionId}`,
+    `- thread_id: ${context.threadId ?? "null"}`,
+    `- turn_id: ${context.turnId}`,
+    "",
+    "When invoking any freecad-* CLI command, pass these values through environment variables:",
+    `- FREECAD_SESSION_ID=${context.sessionId}`,
+    `- FREECAD_THREAD_ID=${context.threadId ?? ""}`,
+    `- FREECAD_TURN_ID=${context.turnId}`,
+    "- FREECAD_CALLER=open_codex_web",
+    "- FREECAD_AGENT_NAME=codex",
+  ].join("\n")
+  return `${ASK_USER_PROTOCOL}\n\n${skillPrefix}${executionContext}\n\n${prompt.trim()}`
 }
 
 function normalizeXmlText(text: string): string {
@@ -66,19 +85,29 @@ export async function taskRoutes(
   fastify: FastifyInstance,
   { config, logger }: { config: AppConfig; logger: Logger }
 ) {
-  fastify.post<{ Body: { prompt: string; threadId?: string | null; enabledSkills?: string[] } }>(
+  fastify.post<{ Body: { prompt: string; sessionId?: string | null; threadId?: string | null; turnId?: string | null; enabledSkills?: string[] } }>(
     "/api/run",
     async (req, reply) => {
-      const { prompt, threadId, enabledSkills } = req.body
+      const { prompt, sessionId, threadId, turnId, enabledSkills } = req.body
       if (!prompt || typeof prompt !== "string" || prompt.trim() === "") {
         return reply.status(400).send({ error: "prompt is required" })
+      }
+      if (!sessionId || typeof sessionId !== "string" || sessionId.trim() === "") {
+        return reply.status(400).send({ error: "sessionId is required" })
+      }
+      if (!turnId || typeof turnId !== "string" || turnId.trim() === "") {
+        return reply.status(400).send({ error: "turnId is required" })
       }
 
       // 如果指定了 skills，把提示注入到 prompt 前面
       const skillNames = (enabledSkills ?? [])
         .filter(s => typeof s === "string" && s.trim() !== "")
         .map(s => s.trim())
-      const finalPrompt = buildPrompt(prompt, skillNames)
+      const finalPrompt = buildPrompt(prompt, skillNames, {
+        sessionId: sessionId.trim(),
+        threadId: typeof threadId === "string" && threadId.trim() !== "" ? threadId.trim() : null,
+        turnId: turnId.trim(),
+      })
 
       reply.raw.writeHead(200, {
         "Content-Type": "text/event-stream",
@@ -167,7 +196,13 @@ export async function taskRoutes(
         if (!abort.signal.aborted) {
           logger.error("codex run failed", {
             err,
-            requestBody: { prompt, threadId: threadId ?? null, enabledSkills: skillNames },
+            requestBody: {
+              prompt,
+              sessionId: sessionId ?? null,
+              threadId: threadId ?? null,
+              turnId: turnId ?? null,
+              enabledSkills: skillNames,
+            },
           })
           reply.raw.write(
             `data: ${JSON.stringify({

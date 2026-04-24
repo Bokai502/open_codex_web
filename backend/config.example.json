@@ -14,7 +14,12 @@
   "server": {
     "port": 3001,
     "host": "0.0.0.0",
-    "corsOrigin": "http://localhost:5173"
+    "corsOrigin": [
+      "http://localhost:5173",
+      "http://127.0.0.1:5173",
+      "https://localhost:5174",
+      "https://127.0.0.1:5174"
+    ]
   },
   "logging": {
     "level": "info",

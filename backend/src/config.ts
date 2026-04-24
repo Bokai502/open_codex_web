@@ -20,7 +20,7 @@ export interface AppConfig {
   server: {
     port: number
     host: string
-    corsOrigin: string
+    corsOrigin: string | string[]
   }
   logging: {
     level: LogLevel
@@ -31,10 +31,42 @@ export interface AppConfig {
 
 const CONFIG_FILE = path.resolve(process.cwd(), "config.json")
 const EXAMPLE_FILE = path.resolve(process.cwd(), "config.example.json")
+const DEFAULT_CORS_ORIGINS = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "https://localhost:5174",
+  "https://127.0.0.1:5174",
+]
 
 function die(msg: string): never {
   process.stderr.write(`\n[config] ${msg}\n\n`)
   process.exit(1)
+}
+
+function normalizeCorsOrigin(
+  value: Partial<AppConfig["server"]>["corsOrigin"],
+): string | string[] {
+  if (value == null) return DEFAULT_CORS_ORIGINS
+
+  if (typeof value === "string") {
+    const origin = value.trim()
+    if (!origin) die("server.corsOrigin 不能为空字符串。")
+    return origin
+  }
+
+  if (Array.isArray(value)) {
+    const origins = value
+      .map((origin) => (typeof origin === "string" ? origin.trim() : ""))
+      .filter((origin) => origin.length > 0)
+
+    if (origins.length === 0) {
+      die("server.corsOrigin 数组不能为空。")
+    }
+
+    return origins
+  }
+
+  die("server.corsOrigin 必须是字符串或字符串数组。")
 }
 
 export function loadConfig(): AppConfig {
@@ -85,7 +117,7 @@ export function loadConfig(): AppConfig {
     server: {
       port: server.port ?? 3001,
       host: server.host ?? "0.0.0.0",
-      corsOrigin: server.corsOrigin ?? "http://localhost:5173",
+      corsOrigin: normalizeCorsOrigin(server.corsOrigin),
     },
     logging: {
       level: logging.level ?? "info",

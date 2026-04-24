@@ -7,6 +7,7 @@ import { sessionRoutes } from "./routes/sessions.js"
 import { imageRoutes } from "./routes/image.js"
 import { healthRoutes, checkCodexEndpoint } from "./routes/health.js"
 import { skillsRoutes } from "./routes/skills.js"
+import { freecadRoutes } from "./routes/freecad.js"
 import { refreshSkillsCache } from "./skills.js"
 
 const config = loadConfig()
@@ -34,6 +35,7 @@ await fastify.register(sessionRoutes, { logger })
 await fastify.register(imageRoutes)
 await fastify.register(healthRoutes, { config, logger })
 await fastify.register(skillsRoutes)
+await fastify.register(freecadRoutes)
 
 // 启动时做一次连接自检（不阻塞启动）
 void checkCodexEndpoint(config).then(result => {

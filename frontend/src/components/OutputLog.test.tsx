@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import { OutputLog } from "./OutputLog"
 
@@ -56,7 +56,7 @@ describe("OutputLog markdown rendering", () => {
     expect(screen.getByRole("list")).toHaveTextContent("first")
   })
 
-  it("hides transient reconnect errors", () => {
+  it("renders reconnect errors", () => {
     render(
       <OutputLog
         turns={[]}
@@ -74,6 +74,50 @@ describe("OutputLog markdown rendering", () => {
       />
     )
 
-    expect(screen.queryByText(/Reconnecting/i)).toBeNull()
+    expect(screen.getByText(/Reconnecting/i)).toBeInTheDocument()
+  })
+
+  it("renders only the first command line by default and expands the rest on click", () => {
+    render(
+      <OutputLog
+        turns={[]}
+        currentPrompt=""
+        currentEvents={[
+          {
+            type: "item.completed",
+            item: {
+              id: "cmd-1",
+              type: "command_execution",
+              command: ["/bin/bash -lc 'freecad-create-assembly --input", "/data/lbk/codex_web/FreeCAD_data/sample.yaml --doc-name", "SampleYamlAssembly'"].join("\n"),
+              aggregated_output: "freecad-get-view",
+              exit_code: 0,
+              status: "completed",
+            },
+          },
+        ]}
+        running={false}
+        pendingAskUser={null}
+        onSubmitAskUser={() => {}}
+        onStopAskUser={() => {}}
+      />
+    )
+
+    const summaryLine = screen.getByText("/bin/bash -lc 'freecad-create-assembly --input")
+    expect(summaryLine).toHaveStyle({
+      whiteSpace: "nowrap",
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      color: "var(--code-text)",
+    })
+    expect(screen.queryByText("/data/lbk/codex_web/FreeCAD_data/sample.yaml --doc-name")).not.toBeInTheDocument()
+    expect(summaryLine.closest("div")).toHaveStyle({
+      background: "var(--code-bg)",
+      border: "1px solid var(--border)",
+    })
+
+    fireEvent.click(screen.getByRole("button"))
+
+    expect(screen.getByText(/\/data\/lbk\/codex_web\/FreeCAD_data\/sample\.yaml --doc-name\s+SampleYamlAssembly'/)).toBeInTheDocument()
+    expect(screen.getByText("freecad-get-view")).toBeInTheDocument()
   })
 })
