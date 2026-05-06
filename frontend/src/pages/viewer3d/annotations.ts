@@ -149,11 +149,15 @@ export function createAnnotationLabel(id: string, palette: AnnotationPalette) {
   labelEl.style.background = palette.tint
   labelEl.style.boxShadow = "0 12px 28px rgba(3, 8, 20, 0.32)"
   labelEl.style.backdropFilter = "blur(8px)"
-  labelEl.style.pointerEvents = "none"
+  labelEl.style.cursor = "pointer"
+  labelEl.style.pointerEvents = "auto"
   labelEl.style.userSelect = "none"
   labelEl.style.whiteSpace = "nowrap"
   labelEl.style.transform = "translate(-9999px, -9999px)"
   labelEl.style.opacity = "0"
+  labelEl.tabIndex = 0
+  labelEl.setAttribute("role", "button")
+  labelEl.setAttribute("aria-label", `Show details for ${id}`)
 
   const capEl = document.createElement("span")
   capEl.style.width = "7px"

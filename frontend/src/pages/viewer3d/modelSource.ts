@@ -1,18 +1,31 @@
-import type { ResolvedModel, ViewerModelSource } from "./types"
+import type { ModelVariant, ResolvedModel, ViewerModelSource } from "./types"
 
-export function buildViewerModelSource(): ViewerModelSource | null {
+export function buildViewerModelSource(variant: ModelVariant): ViewerModelSource | null {
   const params = new URLSearchParams(window.location.search)
   const sessionId = params.get("sessionId")?.trim() ?? ""
   const runId = params.get("runId")?.trim() ?? ""
+  const glbPath = params.get("glbPath")?.trim() ?? ""
 
   const query = new URLSearchParams()
   if (sessionId) query.set("sessionId", sessionId)
   if (runId) query.set("runId", runId)
+  if (glbPath) query.set("glbPath", glbPath)
+  query.set("variant", variant)
 
   return {
     autoRefresh: runId.length === 0,
-    lookupUrl: query.size > 0 ? `/api/freecad/model?${query.toString()}` : "/api/freecad/model",
+    lookupUrl: `/api/freecad/model?${query.toString()}`,
+    variant,
   }
+}
+
+export function getModelVariantFromUrl(): ModelVariant {
+  const params = new URLSearchParams(window.location.search)
+  return params.get("variant") === "replaced" ? "replaced" : "original"
+}
+
+export function getVariantDisplayName(variant: ModelVariant) {
+  return variant === "replaced" ? "geometry_after_replaced.glb" : "geometry_after.glb"
 }
 
 export function getModelVersion(resolvedModel: ResolvedModel) {
@@ -26,7 +39,9 @@ export function getModelVersion(resolvedModel: ResolvedModel) {
 
 export async function fetchResolvedModel(source: ViewerModelSource, signal: AbortSignal) {
   const response = await fetch(source.lookupUrl, { signal, cache: "no-store" })
-  if (!response.ok) return null
+  if (!response.ok) {
+    return null
+  }
   return response.json() as Promise<ResolvedModel>
 }
 

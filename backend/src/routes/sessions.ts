@@ -3,18 +3,45 @@ import fs from "fs/promises"
 import path from "path"
 import { randomBytes } from "crypto"
 import type { Logger } from "../logger.js"
+import { initializeFreecadProgressForSession } from "../freecadProgress.js"
 
 const SESSIONS_FILE = path.resolve(process.cwd(), "sessions.json")
+
+type SessionLike = {
+  id?: unknown
+}
 
 // 先写临时文件再 rename，避免并发写入导致文件截断
 async function atomicWrite(filePath: string, content: string) {
   const tmp = `${filePath}.${randomBytes(4).toString("hex")}.tmp`
   try {
+    await fs.mkdir(path.dirname(filePath), { recursive: true })
     await fs.writeFile(tmp, content, "utf-8")
     await fs.rename(tmp, filePath)
   } catch (err) {
     await fs.unlink(tmp).catch(() => {})
     throw err
+  }
+}
+
+function extractSessionIds(value: unknown): Set<string> {
+  if (!Array.isArray(value)) return new Set()
+
+  return new Set(
+    value
+      .map((session: SessionLike) => session?.id)
+      .filter((id): id is string => typeof id === "string" && id.trim() !== "")
+      .map(id => id.trim()),
+  )
+}
+
+async function readExistingSessions() {
+  try {
+    const raw = await fs.readFile(SESSIONS_FILE, "utf-8")
+    const data = JSON.parse(raw)
+    return Array.isArray(data) ? data : []
+  } catch {
+    return []
   }
 }
 
@@ -46,6 +73,13 @@ export async function sessionRoutes(
         return reply.status(400).send({ error: "Too many sessions (max 1000)" })
       }
       try {
+        const beforeSessionIds = extractSessionIds(await readExistingSessions())
+        const afterSessionIds = extractSessionIds(req.body)
+        const newSessionIds = [...afterSessionIds].filter(id => !beforeSessionIds.has(id))
+
+        for (const sessionId of newSessionIds) {
+          await initializeFreecadProgressForSession(sessionId, true)
+        }
         await atomicWrite(SESSIONS_FILE, JSON.stringify(req.body, null, 2))
         return reply.status(204).send()
       } catch (err) {

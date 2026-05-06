@@ -2,6 +2,7 @@ import { FastifyInstance } from "fastify"
 import { Codex } from "@openai/codex-sdk"
 import type { AppConfig } from "../config.js"
 import type { Logger } from "../logger.js"
+import { initializeFreecadProgressForSession } from "../freecadProgress.js"
 
 const ASK_USER_PROTOCOL = [
   "You can ask the user for one missing piece of information through the application's ask-user-question capability.",
@@ -99,15 +100,20 @@ export async function taskRoutes(
         return reply.status(400).send({ error: "turnId is required" })
       }
 
+      const trimmedSessionId = sessionId.trim()
+      const trimmedTurnId = turnId.trim()
+
       // 如果指定了 skills，把提示注入到 prompt 前面
       const skillNames = (enabledSkills ?? [])
         .filter(s => typeof s === "string" && s.trim() !== "")
         .map(s => s.trim())
       const finalPrompt = buildPrompt(prompt, skillNames, {
-        sessionId: sessionId.trim(),
+        sessionId: trimmedSessionId,
         threadId: typeof threadId === "string" && threadId.trim() !== "" ? threadId.trim() : null,
-        turnId: turnId.trim(),
+        turnId: trimmedTurnId,
       })
+
+      await initializeFreecadProgressForSession(trimmedSessionId)
 
       reply.raw.writeHead(200, {
         "Content-Type": "text/event-stream",

@@ -17,20 +17,95 @@ import {
   fetchResolvedModel,
   buildViewerModelSource,
   getModelDisplayName,
+  getModelVariantFromUrl,
   getModelVersion,
+  getVariantDisplayName,
 } from "./viewer3d/modelSource"
 import { applyTransparency, disposeModelResources, loadGltf } from "./viewer3d/modelUtils"
 import type { Disposable, PartAnnotation, ResolvedModel, WebGPURendererRuntime } from "./viewer3d/types"
 
 const MAX_DEVICE_PIXEL_RATIO = 2
 
+type ComponentDetail = {
+  componentId: string
+  dimensions: string
+  kind: string
+  semanticName: string
+  subsystem: string
+}
+
+type RawComponentInfo = {
+  components?: Array<{
+    component_id?: unknown
+    semantic_name?: unknown
+    display_info?: {
+      dimensions?: unknown
+      kind?: unknown
+      semantic_name?: unknown
+      subsystem?: unknown
+    }
+  }>
+}
+
+type ViewerComponentMessage = {
+  componentId?: unknown
+  type?: unknown
+}
+
+function asText(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : "-"
+}
+
+function parseComponentDetails(data: RawComponentInfo) {
+  const detailsById: Record<string, ComponentDetail> = {}
+
+  data.components?.forEach((component) => {
+    const componentId = asText(component.component_id)
+    if (componentId === "-") return
+
+    detailsById[componentId] = {
+      componentId,
+      dimensions: asText(component.display_info?.dimensions),
+      kind: asText(component.display_info?.kind),
+      semanticName: asText(component.display_info?.semantic_name ?? component.semantic_name),
+      subsystem: asText(component.display_info?.subsystem),
+    }
+  })
+
+  return detailsById
+}
+
 export default function Viewer3D() {
   const mountRef = useRef<HTMLDivElement>(null)
   const annotationSvgRef = useRef<SVGSVGElement>(null)
   const annotationLabelsRef = useRef<HTMLDivElement>(null)
+  const componentDetailsRef = useRef<Record<string, ComponentDetail>>({})
+  const modelVariant = getModelVariantFromUrl()
   const [modelInfo, setModelInfo] = useState<ResolvedModel | null>(null)
+  const [selectedComponent, setSelectedComponent] = useState<ComponentDetail | null>(null)
   const [statusMessage, setStatusMessage] = useState("Resolving FreeCAD geometry...")
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (import.meta.env.MODE === "test") return
+
+    const controller = new AbortController()
+
+    fetch("/api/freecad/component-info", {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then((response) => response.ok ? response.json() as Promise<RawComponentInfo> : null)
+      .then((data) => {
+        if (!data) return
+        componentDetailsRef.current = parseComponentDetails(data)
+      })
+      .catch(() => {
+        // Component details are an optional overlay enhancement.
+      })
+
+    return () => controller.abort()
+  }, [])
 
   useEffect(() => {
     const mount = mountRef.current
@@ -51,9 +126,14 @@ export default function Viewer3D() {
     const modelRequest = new AbortController()
     const disposableResources: Disposable[] = []
     const annotations: PartAnnotation[] = []
+    const componentRootsById = new Map<string, THREE.Object3D>()
+    const originalMaterialsByMesh = new Map<THREE.Mesh, THREE.Material | THREE.Material[]>()
+    const originalRenderOrderByMesh = new Map<THREE.Mesh, number>()
+    const highlightMaterials = new Set<THREE.Material>()
     const screenPoint = new THREE.Vector3()
     const cameraSpacePoint = new THREE.Vector3()
     let annotationsNeedLayout = false
+    let highlightedComponentId: string | null = null
 
     const markAnnotationsDirty = () => {
       annotationsNeedLayout = true
@@ -71,6 +151,103 @@ export default function Viewer3D() {
       annotationsNeedLayout = false
       annotationLabels.replaceChildren()
       annotationSvg.replaceChildren()
+    }
+
+    const setAnnotationActiveState = (componentId: string | null) => {
+      annotations.forEach((annotation) => {
+        const active = annotation.componentId === componentId
+        annotation.labelEl.style.border = active
+          ? "1px solid rgba(125, 211, 252, 0.86)"
+          : "1px solid rgba(122, 148, 212, 0.42)"
+        annotation.labelEl.style.boxShadow = active
+          ? "0 0 0 2px rgba(56, 189, 248, 0.2), 0 18px 34px rgba(14, 165, 233, 0.2)"
+          : "0 12px 28px rgba(3, 8, 20, 0.32)"
+        annotation.labelEl.style.background = active
+          ? "rgba(7, 26, 46, 0.92)"
+          : annotation.labelEl.dataset.tint ?? "rgba(17, 24, 48, 0.76)"
+        annotation.dotEl.setAttribute("r", active ? "6.2" : "4.2")
+        annotation.dotEl.setAttribute("stroke-width", active ? "2" : "1")
+      })
+    }
+
+    const clearModelHighlight = () => {
+      originalMaterialsByMesh.forEach((material, mesh) => {
+        mesh.material = material
+        mesh.renderOrder = originalRenderOrderByMesh.get(mesh) ?? 1
+      })
+      originalMaterialsByMesh.clear()
+      originalRenderOrderByMesh.clear()
+      highlightMaterials.forEach((material) => material.dispose())
+      highlightMaterials.clear()
+      highlightedComponentId = null
+      setAnnotationActiveState(null)
+    }
+
+    const highlightComponent = (componentId: string) => {
+      if (highlightedComponentId === componentId) return
+      clearModelHighlight()
+
+      const componentRoot = componentRootsById.get(componentId)
+      if (!componentRoot) return
+
+      const highlightMaterial = new THREE.MeshStandardMaterial({
+        color: 0x49c8ff,
+        emissive: 0x0d5f92,
+        emissiveIntensity: 0.68,
+        metalness: 0.08,
+        opacity: 0.94,
+        roughness: 0.32,
+        transparent: true,
+      })
+      highlightMaterial.depthWrite = true
+      highlightMaterials.add(highlightMaterial)
+
+      componentRoot.traverse((node) => {
+        const mesh = node as THREE.Mesh
+        if (!mesh.isMesh) return
+
+        originalMaterialsByMesh.set(mesh, mesh.material)
+        originalRenderOrderByMesh.set(mesh, mesh.renderOrder)
+        if (Array.isArray(mesh.material)) {
+          mesh.material = mesh.material.map(() => {
+            const material = highlightMaterial.clone()
+            highlightMaterials.add(material)
+            return material
+          })
+        } else {
+          mesh.material = highlightMaterial
+        }
+        mesh.renderOrder = 4
+      })
+
+      highlightedComponentId = componentId
+      setAnnotationActiveState(componentId)
+    }
+
+    const selectComponent = (componentId: string, notifyParent = true) => {
+      const detail = componentDetailsRef.current[componentId]
+      setSelectedComponent(detail ?? {
+        componentId,
+        dimensions: "-",
+        kind: "-",
+        semanticName: componentId,
+        subsystem: "-",
+      })
+      highlightComponent(componentId)
+
+      if (notifyParent && window.parent !== window) {
+        window.parent.postMessage({
+          componentId,
+          type: "viewer3d:component-selected",
+        }, window.location.origin)
+      }
+    }
+
+    const handleComponentMessage = (event: MessageEvent<ViewerComponentMessage>) => {
+      if (event.origin !== window.location.origin) return
+      if (event.data?.type !== "viewer3d:select-component") return
+      if (typeof event.data.componentId !== "string") return
+      selectComponent(event.data.componentId, false)
     }
 
     const refreshAnnotationMeasurements = () => {
@@ -202,6 +379,7 @@ export default function Viewer3D() {
       model.updateWorldMatrix(true, true)
 
       const componentRoots = collectComponentRoots(model)
+      componentRootsById.clear()
 
       componentRoots
         .map((componentRoot) => ({
@@ -218,6 +396,17 @@ export default function Viewer3D() {
           const anchorWorld = new THREE.Vector3(center.x, bounds.max.y, center.z)
           const palette = ANNOTATION_PALETTES[index % ANNOTATION_PALETTES.length]
           const labelEl = createAnnotationLabel(component.label, palette)
+          labelEl.dataset.tint = palette.tint
+          const showDetails = () => {
+            selectComponent(component.label)
+          }
+          labelEl.addEventListener("click", showDetails)
+          labelEl.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault()
+              showDetails()
+            }
+          })
 
           const lineEl = document.createElementNS(
             "http://www.w3.org/2000/svg",
@@ -243,9 +432,11 @@ export default function Viewer3D() {
           annotationLabels.appendChild(labelEl)
           annotationSvg.appendChild(lineEl)
           annotationSvg.appendChild(dotEl)
+          componentRootsById.set(component.label, component.node)
 
           annotations.push({
             anchorWorld,
+            componentId: component.label,
             dotEl,
             height: DEFAULT_ANNOTATION_HEIGHT,
             labelEl,
@@ -259,7 +450,7 @@ export default function Viewer3D() {
     }
 
     const init = async () => {
-      const modelSource = buildViewerModelSource()
+      const modelSource = buildViewerModelSource(modelVariant)
       if (!modelSource) {
         setErrorMessage("Viewer model source is unavailable.")
         setStatusMessage("")
@@ -379,11 +570,14 @@ export default function Viewer3D() {
         }
 
         if (modelRoot) {
+          clearModelHighlight()
           scene.remove(modelRoot)
           disposeModelResources(modelRoot)
           modelRoot = null
         }
         clearAnnotations()
+        componentRootsById.clear()
+        setSelectedComponent(null)
 
         const model = gltf.scene
         modelRoot = model
@@ -487,6 +681,8 @@ export default function Viewer3D() {
         layoutAnnotations(camera, true)
       })
 
+      window.addEventListener("message", handleComponentMessage)
+
       nextRenderer.setAnimationLoop(() => {
         if (disposed) return
 
@@ -511,7 +707,7 @@ export default function Viewer3D() {
           .catch((error: unknown) => {
             if (disposed) return
             if (phase === "initial") {
-              setStatusMessage(modelSource.autoRefresh ? "Waiting for geometry_after.glb..." : "")
+              setStatusMessage(modelSource.autoRefresh ? `Waiting for ${getVariantDisplayName(modelSource.variant)}...` : "")
               setErrorMessage(
                 modelSource.autoRefresh
                   ? null
@@ -536,6 +732,7 @@ export default function Viewer3D() {
 
       return () => {
         resizeObserver.disconnect()
+        window.removeEventListener("message", handleComponentMessage)
         controls?.removeEventListener("change", markAnnotationsDirty)
         if (lookupInterval) {
           clearInterval(lookupInterval)
@@ -565,6 +762,7 @@ export default function Viewer3D() {
       disposed = true
       modelRequest.abort()
       disposeResize?.()
+      clearModelHighlight()
       clearAnnotations()
       controls?.dispose()
       renderer?.setAnimationLoop(null)
@@ -578,7 +776,7 @@ export default function Viewer3D() {
         mount.removeChild(domElement)
       }
     }
-  }, [])
+  }, [modelVariant])
 
   return (
     <div
@@ -618,6 +816,124 @@ export default function Viewer3D() {
           }}
         />
       </div>
+
+      {selectedComponent && (
+        <div
+          style={{
+            position: "absolute",
+            right: 18,
+            bottom: 18,
+            width: "min(360px, calc(100vw - 36px))",
+            display: "grid",
+            gap: 12,
+            padding: "16px",
+            borderRadius: 8,
+            background: "rgba(6, 12, 27, 0.84)",
+            border: "1px solid rgba(122, 148, 212, 0.34)",
+            boxShadow: "0 18px 42px rgba(0, 0, 0, 0.34)",
+            backdropFilter: "blur(12px)",
+            color: "#d9e6ff",
+            pointerEvents: "auto",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "start",
+              justifyContent: "space-between",
+              gap: 12,
+            }}
+          >
+            <div style={{ display: "grid", gap: 4, minWidth: 0 }}>
+              <span
+                style={{
+                  color: "#93b7ff",
+                  fontFamily: "\"IBM Plex Mono\", Consolas, monospace",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: "0.12em",
+                  textTransform: "uppercase",
+                }}
+              >
+                {selectedComponent.componentId}
+              </span>
+              <span
+                style={{
+                  color: "#f3f7ff",
+                  fontFamily: "\"Space Grotesk\", system-ui, sans-serif",
+                  fontSize: 18,
+                  fontWeight: 700,
+                  lineHeight: 1.2,
+                  overflowWrap: "anywhere",
+                }}
+              >
+                {selectedComponent.semanticName}
+              </span>
+            </div>
+            <button
+              type="button"
+              aria-label="Close component details"
+              onClick={() => setSelectedComponent(null)}
+              style={{
+                width: 28,
+                height: 28,
+                flex: "0 0 auto",
+                border: "1px solid rgba(143, 172, 230, 0.32)",
+                borderRadius: 6,
+                background: "rgba(11, 21, 45, 0.72)",
+                color: "rgba(218, 231, 255, 0.86)",
+                cursor: "pointer",
+                fontSize: 18,
+                lineHeight: "24px",
+              }}
+            >
+              x
+            </button>
+          </div>
+
+          <div style={{ display: "grid", gap: 8 }}>
+            {[
+              ["semantic_name", selectedComponent.semanticName],
+              ["kind", selectedComponent.kind],
+              ["subsystem", selectedComponent.subsystem],
+              ["dimensions", selectedComponent.dimensions],
+            ].map(([label, value]) => (
+              <div
+                key={label}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "96px minmax(0, 1fr)",
+                  gap: 10,
+                  alignItems: "baseline",
+                }}
+              >
+                <span
+                  style={{
+                    color: "rgba(145, 172, 226, 0.68)",
+                    fontFamily: "\"IBM Plex Mono\", Consolas, monospace",
+                    fontSize: 11,
+                    letterSpacing: "0.1em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {label}
+                </span>
+                <span
+                  style={{
+                    color: "#d9e6ff",
+                    fontFamily: "\"IBM Plex Sans\", system-ui, sans-serif",
+                    fontSize: 13,
+                    lineHeight: 1.45,
+                    overflowWrap: "anywhere",
+                  }}
+                >
+                  {value}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div
         style={{

@@ -19,11 +19,11 @@ function groupByDate(sessions: Session[]) {
   const startOfMonth     = startOfToday - 30 * 86_400_000
 
   const groups: { label: string; items: Session[] }[] = [
-    { label: "Today",            items: [] },
-    { label: "Yesterday",        items: [] },
-    { label: "Previous 7 Days",  items: [] },
-    { label: "Previous 30 Days", items: [] },
-    { label: "Older",            items: [] },
+    { label: "今天",            items: [] },
+    { label: "昨天",        items: [] },
+    { label: "最近 7 天",  items: [] },
+    { label: "最近 30 天", items: [] },
+    { label: "更早",            items: [] },
   ]
 
   // 最新的排最前
@@ -80,7 +80,7 @@ function SessionItem({ session, active, onSelect, onDelete }: {
       {(hovered || active) && (
         <button
           onClick={e => { e.stopPropagation(); onDelete() }}
-          title="Delete"
+          title="删除"
           style={{
             flexShrink: 0,
             width: 22, height: 22,
@@ -175,13 +175,13 @@ export function Sidebar({ sessions, activeId, onSelect, onNew, onDelete, collaps
             fontSize: 15, fontWeight: 600,
             color: "#ececf1", letterSpacing: "-0.01em",
           }}>
-            AI Agent
+            AI 工作台
           </span>
         )}
 
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
           {!collapsed && (
-            <IconButton onClick={onNew} title="New chat">
+            <IconButton onClick={onNew} title="新对话">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                 <path d="M2.5 13.5H5.5L13 6L10 3L2.5 10.5V13.5Z"
                   stroke="currentColor" strokeWidth="1.4"
@@ -192,7 +192,7 @@ export function Sidebar({ sessions, activeId, onSelect, onNew, onDelete, collaps
               </svg>
             </IconButton>
           )}
-          <IconButton onClick={onToggleCollapse} title={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
+          <IconButton onClick={onToggleCollapse} title={collapsed ? "展开侧栏" : "收起侧栏"}>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
               <path
                 d={collapsed ? "M6 3L10 8L6 13" : "M10 3L6 8L10 13"}
@@ -233,9 +233,9 @@ export function Sidebar({ sessions, activeId, onSelect, onNew, onDelete, collaps
                 fontSize: 13,
                 lineHeight: "1.6",
               }}>
-                No conversations yet.
+                暂无对话记录。
                 <br />
-                Start a new chat!
+                开始新对话吧！
               </div>
             )}
 
@@ -274,7 +274,7 @@ export function Sidebar({ sessions, activeId, onSelect, onNew, onDelete, collaps
               fontSize: 12, color: "#4a4a4f",
               textAlign: "center", letterSpacing: "-0.01em",
             }}>
-              Powered by Codex SDK
+              基于 Codex SDK
             </div>
           </div>
         </>

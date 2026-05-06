@@ -595,7 +595,7 @@ export function OutputLog({ turns, currentPrompt, currentEvents, running, pendin
   const isEmpty       = turns.length === 0 && !currentPrompt && !running
 
   return (
-    <div style={{ flex: 1, overflowY: "auto", background: "var(--bg)" }}>
+    <div style={{ flex: 1, minHeight: 0, width: "100%", overflowY: "auto", background: "var(--bg)" }}>
       <div style={{
         maxWidth: "var(--content-width)",
         margin: "0 auto",

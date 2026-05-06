@@ -9,6 +9,7 @@ export type AnnotationPalette = {
 
 export type PartAnnotation = {
   anchorWorld: THREE.Vector3
+  componentId: string
   dotEl: SVGCircleElement
   height: number
   labelEl: HTMLDivElement
@@ -47,7 +48,10 @@ export type ResolvedModel = {
   version?: string
 }
 
+export type ModelVariant = "original" | "replaced"
+
 export type ViewerModelSource = {
   autoRefresh: boolean
   lookupUrl: string
+  variant: ModelVariant
 }

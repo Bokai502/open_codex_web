@@ -1,7 +1,7 @@
 import * as THREE from "three/webgpu"
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js"
 
-export function applyTransparency(material: THREE.Material, opacity = 0.09) {
+export function applyTransparency(material: THREE.Material, opacity = 0.42) {
   material.transparent = true
   material.opacity = opacity
   material.depthWrite = false

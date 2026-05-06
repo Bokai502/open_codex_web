@@ -20,9 +20,10 @@ interface Props {
   onSubmit: (prompt: string, enabledSkills: string[]) => void
   onAbort: () => void
   disabled: boolean
+  tone?: "default" | "hero" | "landing"
 }
 
-export function TaskInput({ onSubmit, onAbort, disabled }: Props) {
+export function TaskInput({ onSubmit, onAbort, disabled, tone = "default" }: Props) {
   const [value, setValue] = useState("")
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([])
   const [atMenu, setAtMenu] = useState<AtMenuState | null>(null)
@@ -108,7 +109,7 @@ export function TaskInput({ onSubmit, onAbort, disabled }: Props) {
       | { kind: "skill"; label: string; hint: string; name: string }
     const items: Item[] = []
     if (!q || "add file".includes(q) || "file".includes(q)) {
-      items.push({ kind: "file", label: "Add file", hint: "@file" })
+      items.push({ kind: "file", label: "添加文件", hint: "@file" })
     }
     for (const s of skills) {
       if (selectedSkills.includes(s.name)) continue
@@ -257,39 +258,36 @@ export function TaskInput({ onSubmit, onAbort, disabled }: Props) {
   }
 
   const canSend = value.trim().length > 0 || attachedFiles.length > 0 || selectedSkills.length > 0
+  const isHero = tone === "hero"
+  const isLanding = tone === "landing"
+  const isAccentTone = isHero || isLanding
+  const hasComposerItems = selectedSkills.length > 0 || attachedFiles.length > 0
 
   return (
-    <div ref={containerRef} style={{
-      flexShrink: 0,
-      background: "var(--bg)",
-      padding: "12px var(--content-px) 20px",
-      position: "relative",   // @ 菜单用 absolute 定位
-    }}>
-      <div style={{
-        maxWidth: "var(--content-width)",
-        margin: "0 auto",
-      }}>
+    <div
+      ref={containerRef}
+      className={[
+        "relative w-full flex-shrink-0",
+        isAccentTone
+          ? "bg-transparent px-0 pb-0 pt-0"
+          : "bg-[var(--bg)] px-[var(--content-px)] pb-5 pt-3",
+      ].join(" ")}
+    >
+      <div className={isAccentTone ? "mx-auto w-full max-w-full" : "mx-auto w-full max-w-[var(--content-width)]"}>
 
         {/* ── 已选 skill chips ── */}
-        {selectedSkills.length > 0 && (
-          <div style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 6,
-            marginBottom: 8,
-          }}>
+        {!isLanding && selectedSkills.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-2">
             {selectedSkills.map(name => (
-              <div key={`skill:${name}`} style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 5,
-                padding: "3px 8px 3px 10px",
-                background: "var(--bg-3, #2a2a2a)",
-                border: "1px solid var(--border-2)",
-                borderRadius: 20,
-                fontSize: 12,
-                color: "var(--text-2)",
-              }}>
+              <div
+                key={`skill:${name}`}
+                className={[
+                  "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] text-[var(--text-2)]",
+                  isAccentTone
+                    ? "border-[rgba(88,71,50,0.10)] bg-[rgba(255,255,255,0.88)] shadow-[0_6px_16px_rgba(65,49,31,0.04)]"
+                    : "border-[var(--border-2)] bg-[var(--bg-3)]",
+                ].join(" ")}
+              >
                 <svg width="11" height="11" viewBox="0 0 14 14" fill="none"
                   style={{ flexShrink: 0, opacity: 0.7 }}>
                   <path d="M7 1.5l1.7 3.6 3.8.5-2.8 2.7.7 3.7L7 10.3l-3.4 1.7.7-3.7L1.5 5.6l3.8-.5L7 1.5z"
@@ -298,17 +296,8 @@ export function TaskInput({ onSubmit, onAbort, disabled }: Props) {
                 <span>{name}</span>
                 <button
                   onClick={() => removeSkill(name)}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    padding: 0,
-                    display: "flex",
-                    alignItems: "center",
-                    color: "var(--text-3)",
-                    flexShrink: 0,
-                  }}
-                  title="Remove skill"
+                  className="flex flex-shrink-0 items-center bg-none p-0 text-[var(--text-3)]"
+                  title="移除技能"
                 >
                   <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
                     <path d="M2 2l6 6M8 2l-6 6"
@@ -321,26 +310,18 @@ export function TaskInput({ onSubmit, onAbort, disabled }: Props) {
         )}
 
         {/* ── 已附加的文件 chips ── */}
-        {attachedFiles.length > 0 && (
-          <div style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 6,
-            marginBottom: 8,
-          }}>
+        {!isLanding && attachedFiles.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-2">
             {attachedFiles.map(f => (
-              <div key={f.name} style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 5,
-                padding: "3px 8px 3px 10px",
-                background: "var(--bg-3, #2a2a2a)",
-                border: "1px solid var(--border-2)",
-                borderRadius: 20,
-                fontSize: 12,
-                color: "var(--text-2)",
-                maxWidth: 200,
-              }}>
+              <div
+                key={f.name}
+                className={[
+                  "flex max-w-[220px] items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] text-[var(--text-2)]",
+                  isAccentTone
+                    ? "border-[rgba(88,71,50,0.10)] bg-[rgba(255,255,255,0.88)] shadow-[0_6px_16px_rgba(65,49,31,0.04)]"
+                    : "border-[var(--border-2)] bg-[var(--bg-3)]",
+                ].join(" ")}
+              >
                 <svg width="11" height="11" viewBox="0 0 14 14" fill="none"
                   style={{ flexShrink: 0, opacity: 0.7 }}>
                   <rect x="1" y="3" width="12" height="9" rx="1.5"
@@ -349,26 +330,13 @@ export function TaskInput({ onSubmit, onAbort, disabled }: Props) {
                   <path d="M4 1l1.5 2h3L10 1" stroke="currentColor"
                     strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
-                <span style={{
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}>
+                <span className="overflow-hidden text-ellipsis whitespace-nowrap">
                   {f.name}
                 </span>
                 <button
                   onClick={() => removeFile(f.name)}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    padding: 0,
-                    display: "flex",
-                    alignItems: "center",
-                    color: "var(--text-3)",
-                    flexShrink: 0,
-                  }}
-                  title="Remove"
+                  className="flex flex-shrink-0 items-center bg-none p-0 text-[var(--text-3)]"
+                  title="移除文件"
                 >
                   <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
                     <path d="M2 2l6 6M8 2l-6 6"
@@ -381,24 +349,11 @@ export function TaskInput({ onSubmit, onAbort, disabled }: Props) {
         )}
 
         {/* ── 输入框（相对定位容器，用于承载 @ 菜单）── */}
-        <div style={{ position: "relative" }}>
+        <div className="relative">
 
         {/* ── @ 触发菜单：锚定在输入框正上方，左对齐 ── */}
         {atMenu && menuItems.length > 0 && (
-          <div style={{
-            position: "absolute",
-            bottom: "calc(100% + 8px)",
-            left: 0,
-            right: 0,
-            zIndex: 100,
-            background: "var(--bg-2, #222)",
-            border: "1px solid var(--border-2)",
-            borderRadius: 10,
-            boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
-            padding: "4px",
-            maxHeight: 260,
-            overflowY: "auto",
-          }}>
+          <div className="absolute inset-x-0 bottom-[calc(100%+8px)] z-[100] max-h-[260px] overflow-y-auto rounded-[14px] border border-[var(--border-2)] bg-[var(--bg-2)] p-1 shadow-[0_14px_28px_rgba(38,32,25,0.16)]">
             {menuItems.map((item, idx) => {
               const active = idx === menuHover
               return (
@@ -406,20 +361,7 @@ export function TaskInput({ onSubmit, onAbort, disabled }: Props) {
                   key={item.kind === "skill" ? `skill:${item.name}` : "file"}
                   onMouseDown={e => { e.preventDefault(); selectMenuItem(idx) }}
                   onMouseEnter={() => setMenuHover(idx)}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    width: "100%",
-                    padding: "7px 12px",
-                    background: active ? "var(--bg-3, #2a2a2a)" : "transparent",
-                    border: "none",
-                    borderRadius: 7,
-                    cursor: "pointer",
-                    fontSize: 13,
-                    color: "var(--text)",
-                    textAlign: "left",
-                  }}
+                  className={`flex w-full items-center gap-2 rounded-[10px] border-none px-3 py-2 text-left text-[13px] text-[var(--text)] ${active ? "bg-[var(--bg-3)]" : "bg-transparent"}`}
                 >
                   {item.kind === "file" ? (
                     <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -435,23 +377,10 @@ export function TaskInput({ onSubmit, onAbort, disabled }: Props) {
                         stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
                     </svg>
                   )}
-                  <span style={{
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    flexShrink: 0,
-                  }}>
+                  <span className="flex-shrink-0 overflow-hidden text-ellipsis whitespace-nowrap">
                     {item.label}
                   </span>
-                  <span style={{
-                    marginLeft: "auto",
-                    fontSize: 11,
-                    opacity: 0.5,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    maxWidth: 240,
-                  }}>
+                  <span className="ml-auto max-w-[240px] overflow-hidden text-ellipsis whitespace-nowrap text-[11px] opacity-50">
                     {item.hint}
                   </span>
                 </button>
@@ -460,89 +389,187 @@ export function TaskInput({ onSubmit, onAbort, disabled }: Props) {
           </div>
         )}
 
-        <div style={{
-          display: "flex",
-          alignItems: "flex-end",
-          gap: 8,
-          background: "var(--bg)",
-          border: "1px solid var(--border-2)",
-          borderRadius: 16,
-          padding: "10px 10px 10px 16px",
-          boxShadow: "0 0 0 1px rgba(0,0,0,0.04), 0 2px 12px rgba(0,0,0,0.07)",
-          transition: "border-color 0.15s, box-shadow 0.15s",
-        }}>
-          <textarea
-            ref={textareaRef}
-            value={value}
-            onChange={handleChange}
-            onKeyDown={handleKeyDown}
-            disabled={disabled}
-            placeholder="Message AI… (type @ to attach a file)"
-            rows={1}
-            style={{
-              flex: 1,
-              background: "transparent",
-              border: "none",
-              outline: "none",
-              resize: "none",
-              fontFamily: "var(--font)",
-              fontSize: 15,
-              lineHeight: "1.6",
-              color: "var(--text)",
-              padding: 0,
-              minHeight: 24,
-              maxHeight: 180,
-              overflowY: "auto",
-            }}
-          />
+        {isLanding ? (
+          <div className="w-full overflow-hidden rounded-[28px] border border-black/[0.08] bg-white/80 shadow-[0_34px_80px_rgba(0,0,0,0.12),inset_0_1px_0_rgba(255,255,255,0.92)] backdrop-blur-2xl">
+            <div className="relative px-6 pb-4 pt-7 sm:px-[30px] sm:pt-7">
+              <textarea
+                ref={textareaRef}
+                className="home-composer-textarea"
+                value={value}
+                onChange={handleChange}
+                onKeyDown={handleKeyDown}
+                disabled={disabled}
+                placeholder="输入设计目标、约束条件或要生成的结构方案..."
+                rows={1}
+                style={{
+                  width: "100%",
+                  background: "transparent",
+                  border: "none",
+                  outline: "none",
+                  resize: "none",
+                  fontFamily: "var(--font)",
+                  fontSize: 18,
+                  lineHeight: "1.55",
+                  color: "#1d1d1f",
+                  padding: 0,
+                  minHeight: 126,
+                  maxHeight: 180,
+                  overflowY: "auto",
+                }}
+              />
+            </div>
 
-          {/* Send / Stop button */}
-          <button
-            onClick={handleAction}
-            disabled={!disabled && !canSend}
-            style={{
-              flexShrink: 0,
-              width: 34,
-              height: 34,
-              borderRadius: 8,
-              border: "none",
-              cursor: disabled || canSend ? "pointer" : "default",
-              background: disabled
-                ? "#000"
-                : canSend
-                  ? "#000"
-                  : "var(--bg-3)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              transition: "background 0.15s, opacity 0.15s",
-              opacity: !disabled && !canSend ? 0.35 : 1,
-            }}
+            <div className="flex items-center justify-between gap-4 border-t border-black/[0.05] px-6 py-4 sm:px-6">
+              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-[13px] text-[#8d8d92]">
+                {hasComposerItems ? (
+                  <>
+                    {selectedSkills.map(name => (
+                      <div
+                        key={`landing-skill:${name}`}
+                        className="flex h-[34px] max-w-[180px] items-center gap-1.5 rounded-full border border-black/[0.08] bg-white/85 px-3 text-[13px] text-[#55555a] shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
+                      >
+                        <svg width="11" height="11" viewBox="0 0 14 14" fill="none" className="flex-shrink-0 opacity-70">
+                          <path d="M7 1.5l1.7 3.6 3.8.5-2.8 2.7.7 3.7L7 10.3l-3.4 1.7.7-3.7L1.5 5.6l3.8-.5L7 1.5z"
+                            stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+                        </svg>
+                        <span className="truncate">{name}</span>
+                        <button
+                          onClick={() => removeSkill(name)}
+                          className="flex flex-shrink-0 items-center bg-none p-0 text-[#9aa0aa]"
+                          title="移除技能"
+                        >
+                          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                            <path d="M2 2l6 6M8 2l-6 6"
+                              stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+
+                    {attachedFiles.map(f => (
+                      <div
+                        key={`landing-file:${f.name}`}
+                        className="flex h-[34px] max-w-[200px] items-center gap-1.5 rounded-full border border-black/[0.08] bg-white/85 px-3 text-[13px] text-[#55555a] shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
+                      >
+                        <svg width="11" height="11" viewBox="0 0 14 14" fill="none" className="flex-shrink-0 opacity-70">
+                          <rect x="1" y="3" width="12" height="9" rx="1.5"
+                            stroke="currentColor" strokeWidth="1.4"/>
+                          <path d="M1 6h12" stroke="currentColor" strokeWidth="1.4"/>
+                          <path d="M4 1l1.5 2h3L10 1" stroke="currentColor"
+                            strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                        <span className="truncate">{f.name}</span>
+                        <button
+                          onClick={() => removeFile(f.name)}
+                          className="flex flex-shrink-0 items-center bg-none p-0 text-[#9aa0aa]"
+                          title="移除文件"
+                        >
+                          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                            <path d="M2 2l6 6M8 2l-6 6"
+                              stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </>
+                ) : (
+                  <>
+                    <span className="grid h-[34px] w-[34px] flex-shrink-0 place-items-center rounded-full border border-black/[0.08] bg-white/85 text-[15px] leading-none">
+                      @
+                    </span>
+                    <span className="truncate">Skill 或文件</span>
+                  </>
+                )}
+              </div>
+
+              <button
+                onClick={handleAction}
+                disabled={!disabled && !canSend}
+                aria-label={disabled ? "停止生成" : "发送任务"}
+                className={[
+                  "ml-2 flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full border shadow-[0_2px_6px_rgba(0,0,0,0.10)] transition-[background,opacity,transform] active:scale-95",
+                  disabled || canSend ? "cursor-pointer" : "cursor-default",
+                  disabled || canSend
+                    ? "border-[#202123] bg-[#202123] opacity-100"
+                    : "border-[#d7d7d4] bg-[#e9e9e6] opacity-70",
+                ].join(" ")}
+              >
+                {disabled ? (
+                  <div style={{ width: 10, height: 10, background: "#fff", borderRadius: 2 }} />
+                ) : (
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <path d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div
+            className={[
+              "flex items-end gap-2 border px-[14px] py-3 transition-[border-color,box-shadow]",
+              isHero
+                ? "rounded-[20px] border-[rgba(88,71,50,0.10)] bg-[rgba(255,255,255,0.9)] shadow-[0_12px_24px_rgba(38,26,17,0.07)] backdrop-blur-[10px]"
+                : "rounded-[14px] border-[var(--border-2)] bg-[var(--bg)] shadow-[0_0_0_1px_rgba(0,0,0,0.04),0_2px_12px_rgba(0,0,0,0.06)]",
+            ].join(" ")}
           >
-            {disabled ? (
-              <div style={{ width: 10, height: 10, background: "#fff", borderRadius: 2 }} />
-            ) : (
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <path d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
-                  stroke="white" strokeWidth="1.8"
-                  strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            )}
-          </button>
-        </div>
+            <textarea
+              ref={textareaRef}
+              value={value}
+              onChange={handleChange}
+              onKeyDown={handleKeyDown}
+              disabled={disabled}
+              placeholder={isHero ? "描述你的下一个工作区任务..." : "发送给 AI...（输入 @ 可添加 Skill 或文件）"}
+              rows={1}
+              style={{
+                flex: 1,
+                background: "transparent",
+                border: "none",
+                outline: "none",
+                resize: "none",
+                fontFamily: "var(--font)",
+                fontSize: 15,
+                lineHeight: "1.6",
+                color: "var(--text)",
+                padding: 0,
+                minHeight: 24,
+                maxHeight: 180,
+                overflowY: "auto",
+              }}
+            />
+
+            <button
+              onClick={handleAction}
+              disabled={!disabled && !canSend}
+              aria-label={disabled ? "停止生成" : "发送任务"}
+              className={[
+                "flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[10px] border-none transition-[background,opacity]",
+                disabled || canSend ? "cursor-pointer" : "cursor-default",
+                disabled || canSend ? "bg-[#171310] opacity-100" : "bg-[var(--bg-3)] opacity-35",
+              ].join(" ")}
+            >
+              {disabled ? (
+                <div style={{ width: 10, height: 10, background: "#fff", borderRadius: 2 }} />
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
+                    stroke="white" strokeWidth="1.8"
+                    strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              )}
+            </button>
+          </div>
+        )}
         </div>
 
         {/* Hint */}
-        <p style={{
-          textAlign: "center",
-          marginTop: 8,
-          fontSize: 12,
-          color: "var(--text-3)",
-        }}>
-          {disabled
-            ? "AI is working — click ■ to stop"
-            : "Enter to send · Shift+Enter for new line · @ to add file or skill"}
-        </p>
+        {!isLanding && (
+          <p className={`mt-2 text-center text-[12px] ${isHero ? "text-[var(--text-3)]" : "text-[var(--text-3)]"}`}>
+            {disabled
+              ? "AI 正在处理，点击方块可停止"
+              : "Enter 发送 · Shift+Enter 换行 · @ Skill 或文件"}
+          </p>
+        )}
       </div>
 
       {/* 隐藏的 file input，支持多文件选择 */}

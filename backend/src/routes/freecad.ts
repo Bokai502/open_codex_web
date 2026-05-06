@@ -18,16 +18,28 @@ type RunManifest = {
   version?: number
   run_id?: string
   session_id?: string | null
+  thread_id?: string | null
+  turn_id?: string | null
   created_at?: string
   updated_at?: string
   outputs?: {
     glb_path?: string
+    replaced_glb_path?: string
+    step_path?: string
+    replaced_step_path?: string
   }
   result?: {
+    success?: boolean
     glb_path?: string
+    replaced_glb_path?: string
+    step_path?: string
+    save_path?: string
     document?: string
+    progress_percentages?: Record<string, number>
+    progress_json_path?: string
   }
   operation?: {
+    tool?: string
     status?: string
   }
   artifacts?: RunArtifact[]
@@ -48,6 +60,8 @@ type RegistryLocation = {
   indexFile: string
 }
 
+type ModelVariant = "original" | "replaced"
+
 const LEGACY_WORKSPACE_DIR = path.resolve(process.cwd(), "..", "..", "FreeCAD_data")
 const DEFAULT_FREECAD_RUNTIME_CONFIG = path.resolve(
   process.cwd(),
@@ -59,12 +73,19 @@ const DEFAULT_FREECAD_RUNTIME_CONFIG = path.resolve(
   "config",
   "freecad_runtime.conf",
 )
-const DEFAULT_GEOMETRY_AFTER_STEM = "geometry_after"
-const DEFAULT_GEOMETRY_EDIT_DIR = "02_geometry_edit"
-const DEFAULT_ARTIFACT_REGISTRY_DIR = "registry"
+const DEFAULT_ASSEMBLY_BUILDS_DIR = "assembly_builds"
+const DEFAULT_ARTIFACT_REGISTRY_DIR = path.join("logs", "registry")
+const DEFAULT_GEOM_COMPONENT_INFO_RELATIVE_PATH = path.join("01_layout", "geom_component_info.json")
+const DEFAULT_BOM_INFO_RELATIVE_PATH = path.join("00_inputs", "bom_component_info.json")
+const DEFAULT_REAL_BOM_RELATIVE_PATH = path.join("00_inputs", "real_bom.json")
+const DEFAULT_PROGRESS_PERCENTAGES_RELATIVE_PATH = path.join("logs", "progress_percentages.json")
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim() !== ""
+}
+
+function normalizeModelVariant(value: unknown): ModelVariant {
+  return value === "replaced" ? "replaced" : "original"
 }
 
 function parseSimpleConfig(raw: string) {
@@ -107,6 +128,7 @@ async function resolveConfiguredWorkspaceDir() {
 
 async function resolveRegistryLocations() {
   const workspaceDir = await resolveConfiguredWorkspaceDir()
+  const assemblyBuildsDir = path.join(workspaceDir, DEFAULT_ASSEMBLY_BUILDS_DIR)
   const configuredRegistryDir = isNonEmptyString(process.env.FREECAD_ARTIFACT_REGISTRY_DIR)
     ? path.resolve(process.env.FREECAD_ARTIFACT_REGISTRY_DIR)
     : path.join(workspaceDir, DEFAULT_ARTIFACT_REGISTRY_DIR)
@@ -117,20 +139,9 @@ async function resolveRegistryLocations() {
       indexFile: path.join(configuredRegistryDir, "index.json"),
     },
   ]
-  const legacyRegistryDir = path.join(LEGACY_WORKSPACE_DIR, DEFAULT_ARTIFACT_REGISTRY_DIR)
-  if (legacyRegistryDir !== configuredRegistryDir) {
-    locations.push({
-      registryDir: legacyRegistryDir,
-      indexFile: path.join(legacyRegistryDir, "index.json"),
-    })
-  }
 
   return {
-    geometryAfterGlbPath: path.join(
-      workspaceDir,
-      DEFAULT_GEOMETRY_EDIT_DIR,
-      `${DEFAULT_GEOMETRY_AFTER_STEM}.glb`,
-    ),
+    assemblyBuildsDir,
     locations,
     workspaceDir,
   }
@@ -158,18 +169,123 @@ async function getFileVersion(filePath: string) {
   }
 }
 
-function resolveGlbPath(manifest: RunManifest) {
-  if (isNonEmptyString(manifest.outputs?.glb_path)) return manifest.outputs.glb_path
-  if (isNonEmptyString(manifest.result?.glb_path)) return manifest.result.glb_path
+function resolveScopedAssemblyArtifactPath(
+  artifactPath: string | null | undefined,
+  workspaceDir: string,
+  assemblyBuildsDir: string,
+) {
+  if (!isNonEmptyString(artifactPath)) return null
+
+  const resolvedPath = path.isAbsolute(artifactPath)
+    ? path.resolve(artifactPath)
+    : path.resolve(workspaceDir, artifactPath)
+  const relativeToAssemblyBuilds = path.relative(assemblyBuildsDir, resolvedPath)
+  if (
+    relativeToAssemblyBuilds === "" ||
+    (!relativeToAssemblyBuilds.startsWith("..") && !path.isAbsolute(relativeToAssemblyBuilds))
+  ) {
+    return resolvedPath
+  }
+
+  return null
+}
+
+function resolveScopedWorkspaceFilePath(filePath: string | null | undefined, workspaceDir: string) {
+  if (!isNonEmptyString(filePath)) return null
+
+  const resolvedPath = path.isAbsolute(filePath)
+    ? path.resolve(filePath)
+    : path.resolve(workspaceDir, filePath)
+  const relativeToWorkspace = path.relative(workspaceDir, resolvedPath)
+  if (
+    relativeToWorkspace === "" ||
+    (!relativeToWorkspace.startsWith("..") && !path.isAbsolute(relativeToWorkspace))
+  ) {
+    return resolvedPath
+  }
+
+  return null
+}
+
+function isGlbPath(filePath: string) {
+  return path.extname(filePath).toLowerCase() === ".glb"
+}
+
+async function resolveModelFromGlbPath(glbPath: string | undefined) {
+  if (!isNonEmptyString(glbPath)) return null
+
+  const { workspaceDir } = await resolveRegistryLocations()
+  const resolvedGlbPath = resolveScopedWorkspaceFilePath(glbPath, workspaceDir)
+  if (!resolvedGlbPath || !isGlbPath(resolvedGlbPath)) return null
+
+  const fileVersion = await getFileVersion(resolvedGlbPath).catch(() => null)
+  if (!fileVersion) return null
+
+  return {
+    sessionId: null,
+    runId: null,
+    createdAt: null,
+    updatedAt: null,
+    documentName: path.basename(resolvedGlbPath),
+    glbPath: resolvedGlbPath,
+    version: [
+      "glb-path",
+      resolvedGlbPath,
+      fileVersion.mtimeMs,
+      fileVersion.size,
+    ].join(":"),
+  }
+}
+
+function resolveGlbPath(
+  manifest: RunManifest,
+  variant: ModelVariant,
+  workspaceDir: string,
+) {
+  if (variant === "replaced") {
+    const replacedOutputPath = resolveScopedWorkspaceFilePath(
+      manifest.outputs?.replaced_glb_path,
+      workspaceDir,
+    )
+    if (replacedOutputPath) return replacedOutputPath
+
+    const replacedResultPath = resolveScopedWorkspaceFilePath(
+      manifest.result?.replaced_glb_path,
+      workspaceDir,
+    )
+    if (replacedResultPath) return replacedResultPath
+
+    const replacedGlbArtifact = manifest.artifacts?.find((artifact) =>
+      artifact.kind === "replaced_glb" &&
+      resolveScopedWorkspaceFilePath(artifact.path, workspaceDir),
+    )
+    return resolveScopedWorkspaceFilePath(replacedGlbArtifact?.path, workspaceDir)
+  }
+
+  const outputPath = resolveScopedWorkspaceFilePath(
+    manifest.outputs?.glb_path,
+    workspaceDir,
+  )
+  if (outputPath) return outputPath
+
+  const resultPath = resolveScopedWorkspaceFilePath(
+    manifest.result?.glb_path,
+    workspaceDir,
+  )
+  if (resultPath) return resultPath
 
   const glbArtifact = manifest.artifacts?.find((artifact) =>
-    artifact.kind === "glb" && isNonEmptyString(artifact.path),
+    artifact.kind === "glb" &&
+    resolveScopedWorkspaceFilePath(artifact.path, workspaceDir),
   )
-  return glbArtifact?.path ?? null
+  return resolveScopedWorkspaceFilePath(glbArtifact?.path, workspaceDir)
 }
 
 async function resolveRenderableModelFromManifest(
   manifest: RunManifest,
+  variant: ModelVariant,
+  workspaceDir: string,
+  assemblyBuildsDir: string,
   sessionId?: string,
   runId?: string,
 ): Promise<RenderableModel | null> {
@@ -178,9 +294,8 @@ async function resolveRenderableModelFromManifest(
 
   if (isNonEmptyString(runId) && resolvedRunId !== runId) return null
   if (isNonEmptyString(sessionId) && resolvedSessionId !== sessionId) return null
-  if (manifest.operation?.status && manifest.operation.status !== "success") return null
 
-  const glbPath = resolveGlbPath(manifest)
+  const glbPath = resolveGlbPath(manifest, variant, workspaceDir)
   if (!glbPath) return null
 
   const fileVersion = await getFileVersion(glbPath).catch(() => null)
@@ -195,6 +310,7 @@ async function resolveRenderableModelFromManifest(
     glbPath,
     version: [
       resolvedRunId ?? "unknown-run",
+      variant,
       manifest.updated_at ?? "unknown-update",
       glbPath,
       fileVersion.mtimeMs,
@@ -210,8 +326,8 @@ function getSortableTimestamp(model: RenderableModel) {
   return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed
 }
 
-async function resolveModelFromRegistry(sessionId?: string, runId?: string) {
-  const { locations } = await resolveRegistryLocations()
+async function resolveModelFromRegistry(sessionId?: string, runId?: string, variant: ModelVariant = "original") {
+  const { locations, workspaceDir, assemblyBuildsDir } = await resolveRegistryLocations()
 
   if (isNonEmptyString(runId)) {
     for (const location of locations) {
@@ -224,6 +340,9 @@ async function resolveModelFromRegistry(sessionId?: string, runId?: string) {
 
       const model = await resolveRenderableModelFromManifest(
         manifestRecord.manifest,
+        variant,
+        workspaceDir,
+        assemblyBuildsDir,
         sessionId,
         runId,
       )
@@ -243,6 +362,9 @@ async function resolveModelFromRegistry(sessionId?: string, runId?: string) {
 
         const model = await resolveRenderableModelFromManifest(
           manifestRecord.manifest,
+          variant,
+          workspaceDir,
+          assemblyBuildsDir,
           sessionId,
         )
         if (model) return model
@@ -260,7 +382,12 @@ async function resolveModelFromRegistry(sessionId?: string, runId?: string) {
       const manifestRecord = await readRunManifest(location, manifestRef).catch(() => null)
       if (!manifestRecord) continue
 
-      const model = await resolveRenderableModelFromManifest(manifestRecord.manifest)
+      const model = await resolveRenderableModelFromManifest(
+        manifestRecord.manifest,
+        variant,
+        workspaceDir,
+        assemblyBuildsDir,
+      )
       if (model) candidates.push(model)
     }
   }
@@ -269,42 +396,227 @@ async function resolveModelFromRegistry(sessionId?: string, runId?: string) {
   return candidates[0] ?? null
 }
 
-async function resolveGeometryAfterModel() {
-  const { geometryAfterGlbPath } = await resolveRegistryLocations()
-  const fileVersion = await getFileVersion(geometryAfterGlbPath).catch(() => null)
-  if (!fileVersion) return null
-
-  return {
-    sessionId: null,
-    runId: null,
-    createdAt: null,
-    updatedAt: null,
-    documentName: DEFAULT_GEOMETRY_AFTER_STEM,
-    glbPath: geometryAfterGlbPath,
-    version: [
-      "workspace-default",
-      geometryAfterGlbPath,
-      fileVersion.mtimeMs,
-      fileVersion.size,
-    ].join(":"),
-  } satisfies RenderableModel
+async function resolveModel(
+  sessionId?: string,
+  runId?: string,
+  variant: ModelVariant = "original",
+  glbPath?: string,
+) {
+  return (await resolveModelFromGlbPath(glbPath)) ?? resolveModelFromRegistry(sessionId, runId, variant)
 }
 
-async function resolveModel(sessionId?: string, runId?: string) {
-  if (!isNonEmptyString(sessionId) && !isNonEmptyString(runId)) {
-    const workspaceModel = await resolveGeometryAfterModel()
-    if (workspaceModel) return workspaceModel
+function buildOutputFilesFromManifest(manifest: RunManifest) {
+  const outputFiles: Record<string, { path: string | null; exists: boolean }> = {}
+
+  const addOutputFile = (key: string, filePath: string | undefined) => {
+    if (!isNonEmptyString(filePath)) return
+    const artifact = manifest.artifacts?.find(item => item.path === filePath)
+    outputFiles[key] = {
+      path: filePath,
+      exists: artifact?.exists ?? true,
+    }
   }
 
-  return resolveModelFromRegistry(sessionId, runId)
+  addOutputFile("step", manifest.outputs?.step_path ?? manifest.result?.step_path ?? manifest.result?.save_path)
+  addOutputFile("glb", manifest.outputs?.glb_path ?? manifest.result?.glb_path)
+  addOutputFile("replaced_step", manifest.outputs?.replaced_step_path)
+  addOutputFile("replaced_glb", manifest.outputs?.replaced_glb_path ?? manifest.result?.replaced_glb_path)
+
+  for (const artifact of manifest.artifacts ?? []) {
+    if (!isNonEmptyString(artifact.kind) || !isNonEmptyString(artifact.path)) continue
+    if (outputFiles[artifact.kind]) continue
+    outputFiles[artifact.kind] = {
+      path: artifact.path,
+      exists: artifact.exists ?? true,
+    }
+  }
+
+  return outputFiles
+}
+
+function buildProgressDataFromManifest(manifest: RunManifest) {
+  const progress = manifest.result?.progress_percentages ?? null
+  if (!progress) return null
+
+  return {
+    session_id: manifest.session_id ?? null,
+    run_id: manifest.run_id ?? null,
+    thread_id: manifest.thread_id ?? null,
+    turn_id: manifest.turn_id ?? null,
+    tool: manifest.operation?.tool ?? null,
+    updated_at: manifest.updated_at ?? null,
+    success: manifest.result?.success ?? manifest.operation?.status === "success",
+    progress_percentages: progress,
+    output_files: buildOutputFilesFromManifest(manifest),
+    ...progress,
+  }
+}
+
+async function resolveProgressFromLatestSessionRun(sessionId: string) {
+  const { locations } = await resolveRegistryLocations()
+
+  for (const location of locations) {
+    const index = await readRegistryIndex(location).catch(() => null)
+    const sessionRuns = index?.sessions?.[sessionId] ?? []
+
+    for (const manifestRef of [...sessionRuns].reverse()) {
+      const manifestRecord = await readRunManifest(location, manifestRef).catch(() => null)
+      if (!manifestRecord) continue
+
+      const data = buildProgressDataFromManifest(manifestRecord.manifest)
+      if (!data) continue
+
+      const fileVersion = await getFileVersion(manifestRecord.manifestPath).catch(() => null)
+      return {
+        data,
+        sourcePath: manifestRecord.manifestPath,
+        sourceVersion: fileVersion
+          ? [manifestRecord.manifestPath, fileVersion.mtimeMs, fileVersion.size].join(":")
+          : null,
+      }
+    }
+  }
+
+  return null
 }
 
 export async function freecadRoutes(fastify: FastifyInstance) {
-  fastify.get<{ Querystring: { sessionId?: string; runId?: string } }>(
+  fastify.get("/api/freecad/component-info", async (_req, reply) => {
+    try {
+      const workspaceDir = await resolveConfiguredWorkspaceDir()
+      const componentInfoPath = path.join(workspaceDir, DEFAULT_GEOM_COMPONENT_INFO_RELATIVE_PATH)
+      const raw = await fs.readFile(componentInfoPath, "utf-8").catch(() => null)
+
+      if (raw === null) {
+        return reply.status(404).send({ error: "component info data not found" })
+      }
+
+      const stat = await fs.stat(componentInfoPath)
+
+      reply.header("Cache-Control", "no-cache")
+      return reply.send({
+        ...JSON.parse(raw),
+        source_path: componentInfoPath,
+        source_version: [componentInfoPath, stat.mtimeMs, stat.size].join(":"),
+      })
+    } catch {
+      return reply.status(500).send({ error: "failed to resolve component info data" })
+    }
+  })
+
+  fastify.get("/api/freecad/bom", async (_req, reply) => {
+    try {
+      const workspaceDir = await resolveConfiguredWorkspaceDir()
+      const candidatePaths = [
+        path.join(workspaceDir, DEFAULT_BOM_INFO_RELATIVE_PATH),
+        path.join(workspaceDir, DEFAULT_REAL_BOM_RELATIVE_PATH),
+      ]
+
+      let bomInfoPath: string | null = null
+      let raw: string | null = null
+      for (const candidatePath of candidatePaths) {
+        raw = await fs.readFile(candidatePath, "utf-8").catch(() => null)
+        if (raw !== null) {
+          bomInfoPath = candidatePath
+          break
+        }
+      }
+
+      if (!bomInfoPath || raw === null) {
+        return reply.status(404).send({ error: "BOM data not found" })
+      }
+
+      const stat = await fs.stat(bomInfoPath)
+
+      reply.header("Cache-Control", "no-cache")
+      return reply.send({
+        ...JSON.parse(raw),
+        source_path: bomInfoPath,
+        source_version: [bomInfoPath, stat.mtimeMs, stat.size].join(":"),
+      })
+    } catch {
+      return reply.status(500).send({ error: "failed to resolve BOM data" })
+    }
+  })
+
+  fastify.get<{ Querystring: { sessionId?: string } }>("/api/freecad/progress", async (req, reply) => {
+    try {
+      const workspaceDir = await resolveConfiguredWorkspaceDir()
+      const progressPath = path.join(workspaceDir, DEFAULT_PROGRESS_PERCENTAGES_RELATIVE_PATH)
+      const sessionId = req.query.sessionId?.trim()
+
+      if (isNonEmptyString(sessionId)) {
+        const sessionRunProgress = await resolveProgressFromLatestSessionRun(sessionId)
+        if (sessionRunProgress) {
+          reply.header("Cache-Control", "no-cache")
+          return reply.send({
+            exists: true,
+            data: sessionRunProgress.data,
+            source_path: sessionRunProgress.sourcePath,
+            source_version: sessionRunProgress.sourceVersion,
+            updated_at: sessionRunProgress.data.updated_at,
+          })
+        }
+      }
+
+      const raw = await fs.readFile(progressPath, "utf-8").catch(() => null)
+
+      reply.header("Cache-Control", "no-cache")
+      if (raw === null) {
+        return reply.send({
+          exists: false,
+          data: null,
+          source_path: progressPath,
+          source_version: null,
+        })
+      }
+
+      const stat = await fs.stat(progressPath)
+      let data: unknown
+      try {
+        data = JSON.parse(raw)
+      } catch {
+        return reply.send({
+          exists: false,
+          data: null,
+          error: "progress json is not valid yet",
+          source_path: progressPath,
+          source_version: [progressPath, stat.mtimeMs, stat.size].join(":"),
+          updated_at: stat.mtime.toISOString(),
+        })
+      }
+
+      if (
+        isNonEmptyString(sessionId) &&
+        (!data || typeof data !== "object" || (data as { session_id?: unknown }).session_id !== sessionId)
+      ) {
+        return reply.send({
+          exists: false,
+          data: null,
+          source_path: progressPath,
+          source_version: [progressPath, stat.mtimeMs, stat.size].join(":"),
+          updated_at: stat.mtime.toISOString(),
+        })
+      }
+
+      return reply.send({
+        exists: true,
+        data,
+        source_path: progressPath,
+        source_version: [progressPath, stat.mtimeMs, stat.size].join(":"),
+        updated_at: stat.mtime.toISOString(),
+      })
+    } catch {
+      return reply.status(500).send({ error: "failed to resolve freecad progress data" })
+    }
+  })
+
+  fastify.get<{ Querystring: { sessionId?: string; runId?: string; variant?: string; glbPath?: string } }>(
     "/api/freecad/model",
     async (req, reply) => {
       try {
-        const model = await resolveModel(req.query.sessionId, req.query.runId)
+        const variant = normalizeModelVariant(req.query.variant)
+        const model = await resolveModel(req.query.sessionId, req.query.runId, variant, req.query.glbPath)
         if (!model) {
           return reply.status(404).send({ error: "model not found" })
         }
@@ -312,8 +624,10 @@ export async function freecadRoutes(fastify: FastifyInstance) {
         return reply.send({
           ...model,
           modelUrl: `/api/freecad/model/file?${new URLSearchParams({
+            ...(req.query.glbPath ? { glbPath: model.glbPath } : {}),
             ...(model.sessionId ? { sessionId: model.sessionId } : {}),
             ...(model.runId ? { runId: model.runId } : {}),
+            variant,
             v: model.version,
           }).toString()}`,
         })
@@ -323,11 +637,16 @@ export async function freecadRoutes(fastify: FastifyInstance) {
     },
   )
 
-  fastify.get<{ Querystring: { sessionId?: string; runId?: string } }>(
+  fastify.get<{ Querystring: { sessionId?: string; runId?: string; variant?: string; glbPath?: string } }>(
     "/api/freecad/model/file",
     async (req, reply) => {
       try {
-        const model = await resolveModel(req.query.sessionId, req.query.runId)
+        const model = await resolveModel(
+          req.query.sessionId,
+          req.query.runId,
+          normalizeModelVariant(req.query.variant),
+          req.query.glbPath,
+        )
         if (!model) {
           return reply.status(404).send({ error: "model not found" })
         }
