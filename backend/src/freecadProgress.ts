@@ -3,6 +3,7 @@ import path from "path"
 import { randomBytes } from "crypto"
 
 const DEFAULT_FREECAD_WORKSPACE_DIR = path.resolve(process.cwd(), "..", "..", "FreeCAD_data", "v4_data")
+const ROOT_CONFIG_JSON = path.resolve(process.cwd(), "..", "..", "config.json")
 const DEFAULT_FREECAD_RUNTIME_CONFIG = path.resolve(
   process.cwd(),
   "..",
@@ -36,9 +37,37 @@ function parseSimpleConfig(raw: string) {
   return config
 }
 
+async function readWorkspaceDirFromRootConfig() {
+  try {
+    const raw = await fs.readFile(ROOT_CONFIG_JSON, "utf-8")
+    if (!raw.trim()) return null
+
+    const parsed = JSON.parse(raw) as {
+      FREECAD_WORKSPACE_DIR?: unknown
+      freecad?: { workspaceDir?: unknown; workspace_dir?: unknown }
+    }
+
+    const candidates = [
+      parsed.FREECAD_WORKSPACE_DIR,
+      parsed.freecad?.workspaceDir,
+      parsed.freecad?.workspace_dir,
+    ]
+
+    const workspaceDir = candidates.find(isNonEmptyString)
+    return isNonEmptyString(workspaceDir) ? path.resolve(workspaceDir) : null
+  } catch {
+    return null
+  }
+}
+
 async function resolveFreecadWorkspaceDir() {
   if (isNonEmptyString(process.env.FREECAD_WORKSPACE_DIR)) {
     return path.resolve(process.env.FREECAD_WORKSPACE_DIR)
+  }
+
+  const rootConfigWorkspaceDir = await readWorkspaceDirFromRootConfig()
+  if (rootConfigWorkspaceDir) {
+    return rootConfigWorkspaceDir
   }
 
   const runtimeConfigPath = process.env.FREECAD_RUNTIME_CONFIG || DEFAULT_FREECAD_RUNTIME_CONFIG

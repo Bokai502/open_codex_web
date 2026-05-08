@@ -171,7 +171,7 @@ npm run dev:https
 
 后端默认 CORS 已同时放行本地 HTTP/HTTPS 开发源：
 `http://localhost:5173`、`http://127.0.0.1:5173`、`https://localhost:5174`、`https://127.0.0.1:5174`。
-如果你需要从其他域名或局域网 HTTPS 地址直连后端，再把对应 origin 加到 `backend/config.json` 的 `server.corsOrigin` 数组里即可。
+如果你需要从其他域名或局域网 HTTPS 地址直连后端，再把对应 origin 加到根目录 `/data/lbk/codex_web/config.json` 的 `server.corsOrigin` 数组里即可。
 
 ### 局域网访问
 

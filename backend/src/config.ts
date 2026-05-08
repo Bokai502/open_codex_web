@@ -22,6 +22,11 @@ export interface AppConfig {
     host: string
     corsOrigin: string | string[]
   }
+  freecad: {
+    workspaceDir: string | null
+    rpcHost: string
+    rpcPort: number
+  }
   logging: {
     level: LogLevel
     file: string
@@ -29,8 +34,9 @@ export interface AppConfig {
   }
 }
 
-const CONFIG_FILE = path.resolve(process.cwd(), "config.json")
-const EXAMPLE_FILE = path.resolve(process.cwd(), "config.example.json")
+const ROOT_CONFIG_FILE = path.resolve(process.cwd(), "..", "..", "config.json")
+const LOCAL_CONFIG_FILE = path.resolve(process.cwd(), "config.json")
+const CONFIG_FILE = fs.existsSync(ROOT_CONFIG_FILE) ? ROOT_CONFIG_FILE : LOCAL_CONFIG_FILE
 const DEFAULT_CORS_ORIGINS = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
@@ -73,9 +79,7 @@ export function loadConfig(): AppConfig {
   if (!fs.existsSync(CONFIG_FILE)) {
     die(
       `配置文件不存在: ${CONFIG_FILE}\n` +
-      `请复制模板后修改:\n` +
-      `  cp ${path.relative(process.cwd(), EXAMPLE_FILE)} config.json\n` +
-      `然后把真实的 apiKey / baseUrl / model 填进去再启动。`
+      `请在 /data/lbk/codex_web/config.json 中配置 openai、server、frontend、freecad 等参数后再启动。`
     )
   }
 
@@ -103,6 +107,7 @@ export function loadConfig(): AppConfig {
 
   const codex = cfg.codex ?? {} as Partial<AppConfig["codex"]>
   const server = cfg.server ?? {} as Partial<AppConfig["server"]>
+  const freecad = cfg.freecad ?? {} as Partial<AppConfig["freecad"]>
   const logging = cfg.logging ?? {} as Partial<AppConfig["logging"]>
 
   return {
@@ -118,6 +123,11 @@ export function loadConfig(): AppConfig {
       port: server.port ?? 3001,
       host: server.host ?? "0.0.0.0",
       corsOrigin: normalizeCorsOrigin(server.corsOrigin),
+    },
+    freecad: {
+      workspaceDir: freecad.workspaceDir ?? null,
+      rpcHost: freecad.rpcHost ?? "localhost",
+      rpcPort: freecad.rpcPort ?? 9876,
     },
     logging: {
       level: logging.level ?? "info",
