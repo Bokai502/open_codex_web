@@ -1,0 +1,48 @@
+{
+  "openai": {
+    "apiKey": "sk-01f00d9c043299446e9835312ecd113a4f8be8aabb3abf090c8fd72496f5c447",
+    "baseUrl": "https://api.nexahubai.com/v1",
+    "model": "gpt-5.5"
+  },
+  "codex": {
+    "modelReasoningEffort": "low",
+    "approvalPolicy": "never",
+    "sandboxMode": "danger-full-access",
+    "workingDirectory": null,
+    "skipGitRepoCheck": true
+  },
+  "server": {
+    "port": 3001,
+    "host": "0.0.0.0",
+    "corsOrigin": [
+      "http://localhost:5174",
+      "http://127.0.0.1:5174",
+      "http://10.110.10.11:5174"
+    ]
+  },
+  "frontend": {
+    "host": "0.0.0.0",
+    "port": 5174,
+    "httpsPort": 5175,
+    "strictPort": true
+  },
+  "freecad": {
+    "workspaceDir": "/data/lbk/codex_web/FreeCAD_data/v4_data",
+    "rpcHost": "localhost",
+    "rpcPort": 9877,
+    "displayNum": ":11",
+    "vncPort": 5911,
+    "noVncPort": 7080,
+    "logDir": "/tmp/freecad-remote-7080",
+    "bin": "/home/xie/.local/bin/freecad",
+    "appRegex": "/home/xie/.local/bin/freecad|/tmp/.mount_freeca.*/usr/bin/freecad|/usr/bin/freecad",
+    "startupWaitSeconds": 20,
+    "rpcProbeTimeoutSeconds": 15,
+    "componentInfoMaxStepSizeMb": 5
+  },
+  "logging": {
+    "level": "info",
+    "file": "logs/app.log",
+    "alsoStdout": true
+  }
+}
