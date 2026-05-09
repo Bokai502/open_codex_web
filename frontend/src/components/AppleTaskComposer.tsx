@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react"
+import { useTranslation } from "react-i18next"
 import type { CodexInputItem } from "../types"
 
 interface AttachedFile {
@@ -247,9 +248,10 @@ export function AppleTaskComposer({
   enableTools = true,
   onAbort,
   onSubmit,
-  placeholder = "例如：设计一个遥感小卫星内部布局，约束热源远离载荷舱，并生成可查看模型...",
+  placeholder,
   running,
 }: AppleTaskComposerProps) {
+  const { t } = useTranslation()
   const [value, setValue] = useState("")
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([])
   const [skills, setSkills] = useState<Skill[]>([])
@@ -302,7 +304,7 @@ export function AppleTaskComposer({
 
     const items: MenuItem[] = []
     if (!query || "add image".includes(query) || "image".includes(query) || "图片".includes(query)) {
-      items.push({ kind: "file", label: "添加图片", hint: "@image" })
+      items.push({ kind: "file", label: t("composer.addImage"), hint: "@image" })
     }
     for (const skill of skills) {
       if (selectedSkills.includes(skill.name)) continue
@@ -361,7 +363,7 @@ export function AppleTaskComposer({
   }
 
   return (
-    <div className={`apple-task-composer${compact ? " compact" : ""}`} aria-label="任务输入">
+    <div className={`apple-task-composer${compact ? " compact" : ""}`} aria-label={t("composer.ariaLabel")}>
       <style>{STYLE}</style>
       {enableTools && atMenu && menuItems.length > 0 && (
         <div className="apple-task-composer-menu">
@@ -427,7 +429,7 @@ export function AppleTaskComposer({
           }
         }}
         disabled={running}
-        placeholder={placeholder}
+        placeholder={placeholder ?? t("composer.placeholder")}
       />
       <div className="apple-task-composer-footer">
         {enableTools && (
@@ -437,11 +439,11 @@ export function AppleTaskComposer({
               <button
                 type="button"
                 className="apple-task-composer-pill apple-task-composer-tool-button"
-                aria-label="添加 Skill 或图片"
-                title="添加 Skill 或图片"
+                aria-label={t("composer.addSkillOrImage")}
+                title={t("composer.addSkillOrImage")}
                 onClick={() => setAtMenu({ atIndex: value.length, query: "" })}
               >
-                {compact ? "@" : "@ Skill 或图片"}
+                {compact ? t("composer.addSkillOrImageShort") : `@ ${t("composer.addSkillOrImage")}`}
               </button>
             </>
             ) : (
@@ -465,7 +467,7 @@ export function AppleTaskComposer({
         <button
           type="button"
           className="apple-task-composer-send"
-          aria-label={running ? "停止生成" : "发送任务"}
+          aria-label={running ? t("composer.stop") : t("composer.send")}
           disabled={!running && !canSend}
           onClick={submit}
         >

@@ -1,6 +1,7 @@
 import { StrictMode, lazy, Suspense, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { APP_NAVIGATION_EVENT } from './app/sessionUtils.ts'
+import './i18n.ts'
 import './styles/app.css'
 
 const ModelViewerPage = lazy(() => import('./pages/ModelViewerPage.tsx'))

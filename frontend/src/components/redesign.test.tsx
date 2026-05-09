@@ -12,7 +12,7 @@ describe("front-end redesign targets", () => {
     window.history.replaceState(null, "", "/workspace/test-session")
     render(<WorkspaceSessionPage homePath="/workspace" />)
 
-    expect(screen.getByText("工作台首页")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "返回主页" })).toBeInTheDocument()
     expect(screen.getByText("3D 模型预览")).toBeInTheDocument()
     expect(screen.getByText("BOM List")).toBeInTheDocument()
     expect(screen.queryByText("第一个对话")).not.toBeInTheDocument()

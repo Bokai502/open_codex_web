@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { AppleTaskComposer } from "../components/AppleTaskComposer"
 import { APP_NAVIGATION_EVENT, formatSessionTime } from "../app/sessionUtils"
 import { createImageUrl } from "../components/bomData"
@@ -52,14 +53,14 @@ type ProgressEntry = {
 }
 
 const WORKFLOW_PROGRESS_STAGES: ProgressEntry[] = [
-  { fileNames: [], key: "layout", label: "布局生成", percent: 0 },
-  { fileNames: [], key: "modeling", label: "几何建模", percent: 0 },
-  { fileNames: [], key: "export_file_percent", label: "文件导出", percent: 0 },
-  { fileNames: [], key: "case_build", label: "算例构建", percent: 0 },
-  { fileNames: [], key: "simulation_run", label: "仿真运行", percent: 0 },
-  { fileNames: [], key: "field_export", label: "场数据导出", percent: 0 },
-  { fileNames: [], key: "analysis", label: "结果分析", percent: 0 },
-  { fileNames: [], key: "suggestion", label: "优化建议", percent: 0 },
+  { fileNames: [], key: "layout", label: "workspace.progress.layout", percent: 0 },
+  { fileNames: [], key: "modeling", label: "workspace.progress.modeling", percent: 0 },
+  { fileNames: [], key: "export_file_percent", label: "workspace.progress.exportFile", percent: 0 },
+  { fileNames: [], key: "case_build", label: "workspace.progress.caseBuild", percent: 0 },
+  { fileNames: [], key: "simulation_run", label: "workspace.progress.simulationRun", percent: 0 },
+  { fileNames: [], key: "field_export", label: "workspace.progress.fieldExport", percent: 0 },
+  { fileNames: [], key: "analysis", label: "workspace.progress.analysis", percent: 0 },
+  { fileNames: [], key: "suggestion", label: "workspace.progress.suggestion", percent: 0 },
 ]
 
 type ActivePanel = "bom" | "log" | "model" | "freecad" | "paraview" | "comsol"
@@ -1017,29 +1018,29 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-function progressLabel(key: string) {
+function progressLabel(key: string, t: ReturnType<typeof useTranslation>["t"]) {
   const normalized = key.toLowerCase().replace(/[\s_-]+/gu, "")
   const labels: Record<string, string> = {
-    layoutcompletionpercent: "布局完成",
-    layout: "布局",
-    layoutpercent: "布局",
-    topology: "拓扑",
+    layoutcompletionpercent: t("workspace.progress.layoutComplete"),
+    layout: t("workspace.progress.layout"),
+    layoutpercent: t("workspace.progress.layout"),
+    topology: t("workspace.progress.topology"),
     bom: "BOM",
-    geometry: "几何",
-    modeling: "建模",
-    modelingpercent: "建模",
-    model: "建模",
-    build: "建模",
-    assembly: "装配",
-    replacement: "替换",
-    export: "导出",
-    exportfilepercent: "文件导出",
-    exportpercent: "导出",
+    geometry: t("workspace.progress.geometry"),
+    modeling: t("workspace.progress.modeling"),
+    modelingpercent: t("workspace.progress.modeling"),
+    model: t("workspace.progress.modeling"),
+    build: t("workspace.progress.modeling"),
+    assembly: t("workspace.progress.assembly"),
+    replacement: t("workspace.progress.replacement"),
+    export: t("workspace.progress.export"),
+    exportfilepercent: t("workspace.progress.exportFile"),
+    exportpercent: t("workspace.progress.export"),
     glb: "GLB",
     step: "STEP",
-    preview: "预览",
-    simulation: "仿真",
-    analysis: "分析",
+    preview: t("workspace.progress.preview"),
+    simulation: t("workspace.progress.simulationRun"),
+    analysis: t("workspace.progress.analysis"),
   }
   return labels[normalized] ?? key
 }
@@ -1070,11 +1071,12 @@ function normalizeProgressKey(key: string) {
   return aliases[normalized] ?? key
 }
 
-function getWorkflowProgressEntries(progressEntries: ProgressEntry[]) {
+function getWorkflowProgressEntries(progressEntries: ProgressEntry[], t: ReturnType<typeof useTranslation>["t"]) {
   const progressByKey = new Map(progressEntries.map(entry => [normalizeProgressKey(entry.key), entry]))
   return WORKFLOW_PROGRESS_STAGES.map(stage => {
     const progress = progressByKey.get(stage.key)
-    return progress ? { ...stage, fileNames: progress.fileNames, percent: progress.percent } : stage
+    const label = t(stage.label)
+    return progress ? { ...stage, fileNames: progress.fileNames, label, percent: progress.percent } : { ...stage, label }
   })
 }
 
@@ -1097,7 +1099,7 @@ function normalizePercent(value: unknown) {
   return Math.max(0, Math.min(100, Math.round(percent)))
 }
 
-function getProgressEntries(data: unknown): ProgressEntry[] {
+function getProgressEntries(data: unknown, t: ReturnType<typeof useTranslation>["t"]): ProgressEntry[] {
   const progressData = isRecord(data) && isRecord(data.progress_percentages)
     ? data.progress_percentages
     : isRecord(data) && isRecord(data.progress)
@@ -1122,7 +1124,7 @@ function getProgressEntries(data: unknown): ProgressEntry[] {
       entries.push({
         fileNames: outputFilesByKey.get(key) ?? [],
         key,
-        label: typeof item.label === "string" ? item.label : progressLabel(key),
+        label: typeof item.label === "string" ? item.label : progressLabel(key, t),
         percent,
       })
     })
@@ -1137,7 +1139,7 @@ function getProgressEntries(data: unknown): ProgressEntry[] {
     entries.push({
       fileNames: outputFilesByKey.get(key) ?? [],
       key,
-      label: progressLabel(key),
+      label: progressLabel(key, t),
       percent,
     })
   }
@@ -1203,16 +1205,16 @@ function getProgressFiles(data: unknown) {
   return [...paths].slice(0, 6)
 }
 
-function formatProgressUpdatedAt(progressData: FreecadProgressResponse | null) {
+function formatProgressUpdatedAt(progressData: FreecadProgressResponse | null, language: string, t: ReturnType<typeof useTranslation>["t"]) {
   const rawUpdatedAt = progressData?.updated_at ??
     (isRecord(progressData?.data) && typeof progressData.data.updated_at === "string"
       ? progressData.data.updated_at
       : null)
-  if (!rawUpdatedAt) return "等待更新"
+  if (!rawUpdatedAt) return t("workspace.inspector.waitingUpdate")
 
   const parsed = new Date(rawUpdatedAt)
   if (Number.isNaN(parsed.getTime())) return rawUpdatedAt
-  return parsed.toLocaleString()
+  return parsed.toLocaleString(language.startsWith("en") ? "en-US" : "zh-CN")
 }
 
 type AgentSummary = {
@@ -1279,13 +1281,13 @@ function buildAgentSummaries(turns: Turn[], currentPrompt: string, currentEvents
   return summaries.filter(summary => summary.prompt || summary.answer || summary.reasoning)
 }
 
-function getRunLogEntries(turns: Turn[], currentEvents: ThreadEvent[]): RunLogEntry[] {
+function getRunLogEntries(turns: Turn[], currentEvents: ThreadEvent[], t: ReturnType<typeof useTranslation>["t"]): RunLogEntry[] {
   const events = [...turns.flatMap(turn => turn.events), ...currentEvents]
   const entries: RunLogEntry[] = []
 
   events.forEach((event, index) => {
     if (event.type === "turn.started") {
-      entries.push({ detail: "turn started", id: `turn-started-${index}`, status: "running", title: "开始运行", type: "run" })
+      entries.push({ detail: "turn started", id: `turn-started-${index}`, status: "running", title: t("workspace.logs.turnStarted"), type: "run" })
       return
     }
     if (event.type === "turn.completed") {
@@ -1293,17 +1295,17 @@ function getRunLogEntries(turns: Turn[], currentEvents: ThreadEvent[]): RunLogEn
         detail: `input ${event.usage.input_tokens} / output ${event.usage.output_tokens}`,
         id: `turn-completed-${index}`,
         status: "completed",
-        title: "运行完成",
+        title: t("workspace.logs.turnCompleted"),
         type: "run",
       })
       return
     }
     if (event.type === "turn.failed") {
-      entries.push({ detail: event.error.message, id: `turn-failed-${index}`, status: "failed", title: "运行失败", type: "error" })
+      entries.push({ detail: event.error.message, id: `turn-failed-${index}`, status: "failed", title: t("workspace.logs.turnFailed"), type: "error" })
       return
     }
     if (event.type === "error") {
-      entries.push({ detail: event.message, id: `error-${index}`, status: "error", title: "系统错误", type: "error" })
+      entries.push({ detail: event.message, id: `error-${index}`, status: "error", title: t("workspace.logs.systemError"), type: "error" })
       return
     }
     if (event.type !== "item.started" && event.type !== "item.updated" && event.type !== "item.completed") return
@@ -1342,7 +1344,7 @@ function getRunLogEntries(turns: Turn[], currentEvents: ThreadEvent[]): RunLogEn
         id: `${item.id}-${event.type}`,
         raw: item.changes,
         status: done ? "completed" : "running",
-        title: `文件变更 ${item.changes.length} 项`,
+        title: t("workspace.logs.fileChange", { count: item.changes.length }),
         type: "file",
       })
       return
@@ -1361,17 +1363,17 @@ function getRunLogEntries(turns: Turn[], currentEvents: ThreadEvent[]): RunLogEn
           error: item.error ?? null,
         },
         status: item.status,
-        title: "工具调用",
+        title: t("workspace.logs.toolCall"),
         type: "tool",
       })
       return
     }
     if (item.type === "web_search") {
-      entries.push({ detail: item.query, id: `${item.id}-${event.type}`, status: done ? "completed" : "running", title: "网页搜索", type: "web" })
+      entries.push({ detail: item.query, id: `${item.id}-${event.type}`, status: done ? "completed" : "running", title: t("workspace.logs.webSearch"), type: "web" })
       return
     }
     if (item.type === "ask_user") {
-      entries.push({ detail: item.question, id: `${item.id}-${event.type}`, status: "pending", title: "等待用户确认", type: "ask" })
+      entries.push({ detail: item.question, id: `${item.id}-${event.type}`, status: "pending", title: t("workspace.logs.askUser"), type: "ask" })
     }
   })
 
@@ -1410,6 +1412,7 @@ function AgentUnderstandingPanel({
   pendingAskUser: ReturnType<typeof useWorkspaceAppState>["pendingAskUser"]
   turns: Turn[]
 }) {
+  const { t } = useTranslation()
   const summaries = useMemo(() => buildAgentSummaries(turns, currentPrompt, currentEvents), [currentEvents, currentPrompt, turns])
   const visibleSummaries = summaries.slice(-1)
 
@@ -1417,24 +1420,24 @@ function AgentUnderstandingPanel({
     <section className="wa-left-section">
       <div className="wa-left-section-header">
         <div>
-          <strong>Agent 理解</strong>
-          <span>{summaries.length > 0 ? `${summaries.length} 轮` : "等待对话"}</span>
+          <strong>{t("workspace.agent.title")}</strong>
+          <span>{summaries.length > 0 ? t("workspace.agent.turns", { count: summaries.length }) : t("workspace.agent.waiting")}</span>
         </div>
       </div>
       <div className="wa-agent-feed">
         {visibleSummaries.length === 0 ? (
-          <div className="wa-left-empty">提交指令后，这里会显示 agent 对最新任务的理解和回复。</div>
+          <div className="wa-left-empty">{t("workspace.agent.empty")}</div>
         ) : visibleSummaries.map(summary => (
           <article className="wa-agent-card" key={summary.id}>
-            {summary.prompt && <div className="wa-agent-prompt">用户指令：{summary.prompt}</div>}
+            {summary.prompt && <div className="wa-agent-prompt">{t("workspace.agent.userPrompt", { prompt: summary.prompt })}</div>}
             {summary.answer ? (
               <div className="wa-agent-answer"><MarkdownText text={summary.answer} /></div>
             ) : (
-              <div className="wa-agent-answer">正在理解并生成结果...</div>
+              <div className="wa-agent-answer">{t("workspace.agent.generating")}</div>
             )}
             {summary.reasoning && (
               <details className="wa-agent-thinking">
-                <summary>查看推理过程</summary>
+                <summary>{t("workspace.agent.reasoning")}</summary>
                 <MarkdownText text={summary.reasoning} tone="muted" />
               </details>
             )}
@@ -1442,12 +1445,12 @@ function AgentUnderstandingPanel({
         ))}
         {pendingAskUser && (
           <article className="wa-agent-card">
-            <div className="wa-agent-prompt">需要确认：{pendingAskUser.question}</div>
+            <div className="wa-agent-prompt">{t("workspace.agent.needsConfirmation", { question: pendingAskUser.question })}</div>
             <div className="wa-ask-user">
               {pendingAskUser.options.map(option => (
                 <button type="button" key={option} onClick={() => onSubmitAskUser(option)}>{option}</button>
               ))}
-              <button type="button" onClick={onStopAskUser}>停止对话</button>
+              <button type="button" onClick={onStopAskUser}>{t("workspace.agent.stop")}</button>
             </div>
           </article>
         )}
@@ -1480,17 +1483,18 @@ function RunLogPanel({
   onSelect: (entry: RunLogEntry) => void
   selectedLogId: string
 }) {
+  const { t } = useTranslation()
   return (
     <section className="wa-left-section">
       <div className="wa-left-section-header">
         <div>
-          <strong>系统日志</strong>
-          <span>{entries.length > 0 ? `${entries.length} 条` : "暂无 runs"}</span>
+          <strong>{t("workspace.logs.title")}</strong>
+          <span>{entries.length > 0 ? t("workspace.logs.count", { count: entries.length }) : t("workspace.logs.noRuns")}</span>
         </div>
       </div>
       <div className="wa-run-feed">
         {entries.length === 0 ? (
-          <div className="wa-left-empty">工作目录 logs 中的 JSON 阶段日志会显示在这里。</div>
+          <div className="wa-left-empty">{t("workspace.logs.empty")}</div>
         ) : (
           entries.map(entry => (
             <button
@@ -1523,6 +1527,7 @@ interface WorkspaceAppleContentProps {
 }
 
 export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
+  const { i18n, t } = useTranslation()
   const {
     activeSessionId,
     currentEvents,
@@ -1555,7 +1560,7 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
 
   const activeSession = sortedSessions.find(session => session.id === activeSessionId)
   const workspaceItems = workspaces?.items ?? []
-  const currentWorkspaceName = workspaces?.currentName ?? workspaces?.effective?.split(/[\\/]/u).pop() ?? "未选择"
+  const currentWorkspaceName = workspaces?.currentName ?? workspaces?.effective?.split(/[\\/]/u).pop() ?? t("workspace.noWorkspace")
   const currentWorkspaceDir = workspaces?.current ?? workspaces?.effective ?? null
   const unassignedWorkspaceItem = useMemo<FreecadWorkspaceItem>(() => ({
     missing: [],
@@ -1589,10 +1594,10 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
   const hoveredWorkspaceSessions = sessionsByWorkspace.find(item => item.name === hoveredWorkspace?.name)?.sessions ?? []
   const selectedBom = bomInfo.components.find(component => component.componentId === selectedBomId) ?? bomInfo.components[0]
   const fileNames = useMemo(() => getFileNames(turns, currentEvents), [turns, currentEvents])
-  const progressEntries = useMemo(() => getProgressEntries(progressData?.data), [progressData])
-  const workflowProgressEntries = useMemo(() => getWorkflowProgressEntries(progressEntries), [progressEntries])
+  const progressEntries = useMemo(() => getProgressEntries(progressData?.data, t), [progressData, t])
+  const workflowProgressEntries = useMemo(() => getWorkflowProgressEntries(progressEntries, t), [progressEntries, t])
   const progressFiles = useMemo(() => getProgressFiles(progressData?.data), [progressData])
-  const runLogEntries = useMemo(() => getRunLogEntries(turns, currentEvents), [currentEvents, turns])
+  const runLogEntries = useMemo(() => getRunLogEntries(turns, currentEvents, t), [currentEvents, t, turns])
   const logEntries = useMemo(() => getDisplayLogEntries(stageLogs, runLogEntries), [runLogEntries, stageLogs])
   const selectedLog = logEntries.find(entry => entry.id === selectedLogId) ?? logEntries[0] ?? null
   const displayedFileNames = progressFiles.length > 0 ? progressFiles : fileNames
@@ -1609,11 +1614,11 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
   const paraviewHref = "http://10.110.10.11:6081/vnc.html?autoconnect=true&resize=scale&path=websockify"
   const comsolHref = "http://10.110.10.11:6082/vnc.html?autoconnect=true&resize=scale&path=websockify"
   const activeTool = activePanel === "freecad"
-    ? { label: "FreeCAD", subtitle: "远程 FreeCAD 会话", title: "FreeCAD 工作台", url: freecadHref }
+    ? { label: "FreeCAD", subtitle: t("workspace.tools.freecadSubtitle"), title: t("workspace.tools.freecadTitle"), url: freecadHref }
     : activePanel === "paraview"
-      ? { label: "ParaView", subtitle: "远程 ParaView 会话", title: "ParaView 工作台", url: paraviewHref }
+      ? { label: "ParaView", subtitle: t("workspace.tools.paraviewSubtitle"), title: t("workspace.tools.paraviewTitle"), url: paraviewHref }
       : activePanel === "comsol"
-        ? { label: "COMSOL", subtitle: "远程 COMSOL 会话", title: "COMSOL 工作台", url: comsolHref }
+        ? { label: "COMSOL", subtitle: t("workspace.tools.comsolSubtitle"), title: t("workspace.tools.comsolTitle"), url: comsolHref }
         : null
   const orderedBomComponents = useMemo(() => {
     if (!selectedBomId) return bomInfo.components
@@ -1688,7 +1693,7 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
     const targetWorkspaceName = workspace.name === UNASSIGNED_WORKSPACE_NAME ? currentWorkspaceName : workspace.name
     const targetWorkspaceDir = workspace.name === UNASSIGNED_WORKSPACE_NAME ? currentWorkspaceDir : workspace.path
 
-    if (targetWorkspaceName && targetWorkspaceName !== "未选择") {
+    if (targetWorkspaceName && targetWorkspaceName !== t("workspace.noWorkspace")) {
       handleAssignSessionWorkspace(session.id, {
         workspaceDir: targetWorkspaceDir,
         workspaceName: targetWorkspaceName,
@@ -1803,19 +1808,19 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
   }, [logEntries, selectedLogId])
 
   const stageTitle = activePanel === "model"
-    ? "3D 模型预览"
+    ? t("workspace.stage.modelTitle")
     : activePanel === "bom"
-      ? "BOM 清单"
+      ? t("workspace.stage.bomTitle")
       : activePanel === "log"
-        ? "系统日志"
-      : activeTool?.title ?? "工具工作台"
+        ? t("workspace.stage.logTitle")
+      : activeTool?.title ?? t("workspace.stage.toolTitle")
   const stageSubtitle = activePanel === "model"
-    ? activeSessionId ? "当前会话模型" : "等待会话模型"
+    ? activeSessionId ? t("workspace.stage.currentModel") : t("workspace.stage.waitingModel")
     : activePanel === "bom"
-      ? bomLoading ? "正在加载 BOM 数据" : `${bomInfo.totalRecords} 个组件`
+      ? bomLoading ? t("workspace.stage.loadingBom") : t("workspace.stage.components", { count: bomInfo.totalRecords })
       : activePanel === "log"
-        ? selectedLog ? selectedLog.title : "等待日志"
-      : activeTool?.subtitle ?? "远程工具会话"
+        ? selectedLog ? selectedLog.title : t("workspace.stage.waitingLog")
+      : activeTool?.subtitle ?? t("workspace.stage.remoteTool")
 
   return (
     <div className="workspace-apple">
@@ -1823,9 +1828,9 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
       <header className="wa-topbar">
         <div className="wa-topbar-inner">
           <div className="wa-nav-left">
-            <button type="button" className="wa-back-button" aria-label="返回主页" onClick={handleReturnHome}>
+            <button type="button" className="wa-back-button" aria-label={t("workspace.backAria")} onClick={handleReturnHome}>
               <span>‹</span>
-              <span>首页</span>
+              <span>{t("common.home")}</span>
             </button>
             <div className="wa-workspace-menu">
               <button
@@ -1836,14 +1841,14 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
                 onClick={() => setWorkspaceOpen(open => !open)}
                 title={workspaces?.effective ?? workspaces?.current ?? undefined}
               >
-                <span>工作区：{currentWorkspaceName}</span>
+                <span>{t("workspace.workspacePrefix", { name: currentWorkspaceName })}</span>
                 <span>▾</span>
               </button>
               {workspaceOpen && (
                 <div className="wa-workspace-dropdown">
                   <div className="wa-workspace-list">
                     {menuWorkspaceItems.length === 0 ? (
-                      <div className="wa-left-empty">暂无可用工作区。</div>
+                      <div className="wa-left-empty">{t("workspace.noWorkspaces")}</div>
                     ) : (
                       menuWorkspaceItems.map(item => (
                         <button
@@ -1857,15 +1862,15 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
                           onFocus={() => setHoveredWorkspaceName(item.name)}
                           onMouseEnter={() => setHoveredWorkspaceName(item.name)}
                         >
-                          <strong>{item.name === UNASSIGNED_WORKSPACE_NAME ? "未归属历史" : item.name}</strong>
-                          <span>{item.valid ? `${getWorkspaceSessionCount(item)} 条历史` : `缺少 ${item.missing?.join(", ") || "必要目录"}`}</span>
+                          <strong>{item.name === UNASSIGNED_WORKSPACE_NAME ? t("workspace.unassignedHistory") : item.name}</strong>
+                          <span>{item.valid ? t("workspace.historyCount", { count: getWorkspaceSessionCount(item) }) : t("workspace.missing", { items: item.missing?.join(", ") || t("workspace.requiredDirs") })}</span>
                         </button>
                       ))
                     )}
                   </div>
                   <div className="wa-workspace-history">
                     <div className="wa-workspace-history-title">
-                      {hoveredWorkspace ? `${hoveredWorkspace.name === UNASSIGNED_WORKSPACE_NAME ? "未归属" : hoveredWorkspace.name} 的历史记录` : "历史记录"}
+                      {hoveredWorkspace ? t("workspace.workspaceHistoryTitle", { name: hoveredWorkspace.name === UNASSIGNED_WORKSPACE_NAME ? t("workspace.unassigned") : hoveredWorkspace.name }) : t("workspace.historyRecords")}
                     </div>
                     {hoveredWorkspace && hoveredWorkspaceSessions.length > 0 ? (
                       hoveredWorkspaceSessions.slice(0, 12).map(session => (
@@ -1875,19 +1880,19 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
                           key={session.id}
                           onClick={() => handleSelectWorkspaceHistory(session, hoveredWorkspace)}
                         >
-                          <strong>{session.turns[0]?.userPrompt || session.title || "未命名会话"}</strong>
+                          <strong>{session.turns[0]?.userPrompt || session.title || t("common.unnamedSession")}</strong>
                           <span>{formatSessionTime(session.createdAt)}</span>
                         </button>
                       ))
                     ) : (
-                      <div className="wa-left-empty">暂无历史记录。</div>
+                      <div className="wa-left-empty">{t("workspace.noHistory")}</div>
                     )}
                   </div>
                 </div>
               )}
             </div>
           </div>
-          <div className="wa-tabs" aria-label="工作区标签">
+          <div className="wa-tabs" aria-label={t("workspace.tabsAria")}>
             <button
               type="button"
               className={activePanel === "bom" ? "active" : undefined}
@@ -1900,18 +1905,18 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
               className={activePanel === "log" ? "active" : undefined}
               onClick={() => setActivePanel("log")}
             >
-              日志
+              {t("workspace.tabs.log")}
             </button>
             <button
               type="button"
               className={activePanel === "model" ? "active" : undefined}
               onClick={() => setActivePanel("model")}
             >
-              模型
+              {t("workspace.tabs.model")}
             </button>
             <div className="wa-tool-menu">
-              <button type="button">工具 ▾</button>
-              <div className="wa-tool-panel" role="menu" aria-label="工具列表">
+              <button type="button">{t("workspace.tabs.tools")} ▾</button>
+              <div className="wa-tool-panel" role="menu" aria-label={t("workspace.toolsAria")}>
                 <button
                   type="button"
                   onClick={() => setActivePanel("freecad")}
@@ -1935,7 +1940,7 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
           </div>
           <div className="wa-status-pill">
             <span className="wa-status-dot" />
-            {running ? "运行中" : activeSession ? "已加载会话" : "等待会话"}
+            {running ? t("workspace.status.running") : activeSession ? t("workspace.status.loaded") : t("workspace.status.waiting")}
           </div>
         </div>
       </header>
@@ -1945,13 +1950,13 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
           <section className="wa-left-section wa-left-input">
             <div className="wa-left-section-header">
               <div>
-                <strong>用户指令</strong>
-                <span>{activeSession?.title || (activeSessionId ? `会话 ${activeSessionId}` : "新任务")}</span>
+                <strong>{t("workspace.input.title")}</strong>
+                <span>{activeSession?.title || (activeSessionId ? t("workspace.input.session", { id: activeSessionId }) : t("workspace.input.newTask"))}</span>
               </div>
             </div>
             <div className="wa-left-input-body">
               {pendingAskUser ? (
-                <div className="wa-left-pending">Agent 正在等待确认，请在中间区域处理后继续输入。</div>
+                <div className="wa-left-pending">{t("workspace.input.pending")}</div>
               ) : (
                 <AppleTaskComposer
                   compact
@@ -1959,7 +1964,7 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
                   onSubmit={submitAndRefreshProgress}
                   onAbort={abort}
                   running={running}
-                  placeholder="输入用户指令、修改要求或输入 @ 添加 Skill 或文件..."
+                  placeholder={t("composer.compactPlaceholder")}
                 />
               )}
             </div>
@@ -1985,35 +1990,36 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
             </div>
           </div>
           <div className="wa-stage-body">
-            <div className="wa-stage-toolbar">
-              <button
-                type="button"
-                className="wa-status-pill"
-                onClick={() => {
-                  if (activePanel === "model") openExternalWindow(viewerHref)
-                  if (activeTool) openExternalWindow(activeTool.url)
-                }}
-                disabled={activePanel === "bom" || activePanel === "log" || (activePanel === "model" && !activeSessionId)}
-              >
-                {activePanel === "model" ? "3D Viewer" : activePanel === "bom" ? "BOM" : activePanel === "log" ? "日志" : activeTool?.label}
-              </button>
-            </div>
+            {(activeTool || (activePanel === "model" && activeSessionId)) && (
+              <div className="wa-stage-toolbar">
+                <button
+                  type="button"
+                  className="wa-status-pill"
+                  onClick={() => {
+                    if (activePanel === "model") openExternalWindow(viewerHref)
+                    if (activeTool) openExternalWindow(activeTool.url)
+                  }}
+                >
+                  {activePanel === "model" ? "3D Viewer" : activeTool?.label}
+                </button>
+              </div>
+            )}
             {activePanel === "model" ? (
               activeSessionId ? (
-                <iframe className="wa-viewer" title="3D 模型预览" src={viewerHref} />
+                <iframe className="wa-viewer" title={t("workspace.stage.modelTitle")} src={viewerHref} />
               ) : (
                 <div className="wa-stage-empty">
                   <div className="wa-stage-empty-inner">
-                    <strong>等待生成模型</strong>
-                    <span>提交左侧用户指令后，本会话生成的 3D 模型会显示在这里。</span>
+                    <strong>{t("workspace.stage.waitModelTitle")}</strong>
+                    <span>{t("workspace.stage.waitModelDescription")}</span>
                   </div>
                 </div>
               )
             ) : activePanel === "bom" ? (
               <div className="wa-bom-stage">
                 <div className="wa-bom-stage-inner">
-                  <h2>BOM 清单</h2>
-                  <p>{bomLoading ? "正在加载 BOM 数据..." : `当前 BOM 共 ${bomInfo.totalRecords} 个组件。`}</p>
+                  <h2>{t("workspace.stage.bomTitle")}</h2>
+                  <p>{bomLoading ? `${t("workspace.stage.loadingBom")}...` : t("workspace.stage.bomSummary", { count: bomInfo.totalRecords })}</p>
                   {selectedBom ? (
                     <div className="wa-bom-detail">
                       <div className="wa-bom-detail-card">
@@ -2024,7 +2030,7 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
                           />
                         ) : (
                           <div className="wa-file">
-                            <span>暂无组件图片</span>
+                            <span>{t("workspace.stage.noComponentImage")}</span>
                             <small>-</small>
                           </div>
                         )}
@@ -2034,20 +2040,20 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
                         <p>{selectedBom.description}</p>
                         <div className="wa-bom-detail-fields">
                           {[
-                            ["组件编号", selectedBom.componentId],
-                            ["语义名", selectedBom.semanticName],
-                            ["型号", selectedBom.model],
-                            ["数量", selectedBom.quantity],
-                            ["分系统", selectedBom.subsystem],
-                            ["类型", selectedBom.kind],
-                            ["类别", selectedBom.category],
-                            ["尺寸", selectedBom.dimensions || selectedBom.sizeMm],
-                            ["质量", selectedBom.massKg === null ? "-" : `${selectedBom.massKg} kg`],
-                            ["功耗", selectedBom.powerW === null ? "-" : `${selectedBom.powerW} W`],
-                            ["材料", selectedBom.material],
-                            ["安装面", selectedBom.mountFace],
-                            ["来源", selectedBom.source],
-                            ...Object.entries(selectedBom.thermal).map(([label, value]) => [`热参数 · ${label}`, value]),
+                            [t("workspace.bomFields.componentId"), selectedBom.componentId],
+                            [t("workspace.bomFields.semanticName"), selectedBom.semanticName],
+                            [t("workspace.bomFields.model"), selectedBom.model],
+                            [t("workspace.bomFields.quantity"), selectedBom.quantity],
+                            [t("workspace.bomFields.subsystem"), selectedBom.subsystem],
+                            [t("workspace.bomFields.kind"), selectedBom.kind],
+                            [t("workspace.bomFields.category"), selectedBom.category],
+                            [t("workspace.bomFields.dimensions"), selectedBom.dimensions || selectedBom.sizeMm],
+                            [t("workspace.bomFields.mass"), selectedBom.massKg === null ? "-" : `${selectedBom.massKg} kg`],
+                            [t("workspace.bomFields.power"), selectedBom.powerW === null ? "-" : `${selectedBom.powerW} W`],
+                            [t("workspace.bomFields.material"), selectedBom.material],
+                            [t("workspace.bomFields.mountFace"), selectedBom.mountFace],
+                            [t("workspace.bomFields.source"), selectedBom.source],
+                            ...Object.entries(selectedBom.thermal).map(([label, value]) => [t("workspace.bomFields.thermal", { label }), value]),
                           ].map(([label, value]) => (
                             <div className="wa-bom-field" key={String(label)}>
                               <span>{String(label)}</span>
@@ -2067,7 +2073,7 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
                         >
                           <span className="wa-bom-id">{component.componentId}</span>
                           <strong>{component.nameCn || component.name || component.model}</strong>
-                          <small>{component.subsystem || component.kind || "组件"} · x{component.quantity}</small>
+                          <small>{component.subsystem || component.kind || t("common.component")} · x{component.quantity}</small>
                         </button>
                       ))}
                     </div>
@@ -2077,18 +2083,18 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
             ) : activePanel === "log" ? (
               <div className="wa-log-stage">
                 <div className="wa-log-stage-inner">
-                  <h2>系统日志</h2>
-                  <p>{logEntries.length > 0 ? `共 ${logEntries.length} 条日志，点击左侧日志项查看详情。` : "暂无日志数据。"}</p>
+                  <h2>{t("workspace.stage.logTitle")}</h2>
+                  <p>{logEntries.length > 0 ? t("workspace.stage.logSummary", { count: logEntries.length }) : t("workspace.stage.noLogData")}</p>
                   {selectedLog ? (
                     <div className="wa-log-detail-card">
                       <h3>{selectedLog.title}</h3>
                       <p>{selectedLog.detail}</p>
                       <div className="wa-log-detail-grid">
                         {[
-                          ["状态", selectedLog.status],
-                          ["类型", selectedLog.type],
-                          ["时间", selectedLog.time ? formatStageLogTime(selectedLog.time) : "-"],
-                          ["来源", selectedLog.source ?? "-"],
+                          [t("workspace.logFields.status"), selectedLog.status],
+                          [t("workspace.logFields.type"), selectedLog.type],
+                          [t("workspace.logFields.time"), selectedLog.time ? formatStageLogTime(selectedLog.time) : "-"],
+                          [t("workspace.logFields.source"), selectedLog.source ?? "-"],
                           ["ID", selectedLog.id],
                           ...Object.entries(selectedLog.fields ?? {}),
                         ].map(([label, value]) => (
@@ -2104,8 +2110,8 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
                     </div>
                   ) : (
                     <div className="wa-log-detail-card">
-                      <h3>等待日志</h3>
-                      <p>工作流运行后，系统日志会显示在这里。</p>
+                      <h3>{t("workspace.stage.logEmptyTitle")}</h3>
+                      <p>{t("workspace.stage.logEmptyDescription")}</p>
                     </div>
                   )}
                 </div>
@@ -2113,7 +2119,7 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
             ) : (
               <iframe
                 className="wa-viewer"
-                title={activeTool?.label ?? "远程工具"}
+                title={activeTool?.label ?? t("workspace.stage.remoteToolTitle")}
                 src={activeTool?.url ?? freecadHref}
               />
             )}
@@ -2121,15 +2127,15 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
           <div className="wa-stage-footer">
             <div>
               <strong>{bomInfo.totalRecords || "-"}</strong>
-              <span>BOM 组件</span>
+              <span>{t("workspace.footer.bomComponents")}</span>
             </div>
             <div>
               <strong>{turns.length}</strong>
-              <span>历史轮次</span>
+              <span>{t("workspace.footer.turns")}</span>
             </div>
             <div>
-              <strong>{running ? "RUN" : "IDLE"}</strong>
-              <span>当前状态</span>
+              <strong>{running ? t("workspace.status.run") : t("workspace.status.idle")}</strong>
+              <span>{t("workspace.footer.currentStatus")}</span>
             </div>
           </div>
         </section>
@@ -2137,14 +2143,14 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
         <aside className="wa-panel wa-inspector">
           <div className="wa-panel-header">
             <div className="wa-panel-title">
-              <strong>产物与 BOM</strong>
-              <span>当前会话沉淀的关键输出</span>
+              <strong>{t("workspace.inspector.title")}</strong>
+              <span>{t("workspace.inspector.subtitle")}</span>
             </div>
           </div>
           <div className="wa-inspector-content">
             <section className="wa-info-card">
-              <h3>工作流进度</h3>
-              <p>更新时间：{formatProgressUpdatedAt(progressData)}</p>
+              <h3>{t("workspace.inspector.progressTitle")}</h3>
+              <p>{t("workspace.inspector.updatedAt", { time: formatProgressUpdatedAt(progressData, i18n.language, t) })}</p>
               <div className="wa-progress">
                 {workflowProgressEntries.map(item => (
                     <div className="wa-progress-item" key={item.key}>
@@ -2157,8 +2163,8 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
             </section>
 
             <section className="wa-info-card">
-              <h3>BOM List</h3>
-              <p>{bomLoading ? "正在加载 BOM 数据..." : `共 ${bomInfo.totalRecords} 个组件，点击可同步选择。`}</p>
+              <h3>{t("workspace.inspector.bomTitle")}</h3>
+              <p>{bomLoading ? `${t("workspace.stage.loadingBom")}...` : t("workspace.inspector.bomSummary", { count: bomInfo.totalRecords })}</p>
               <div className="wa-bom-list">
                 {(orderedBomComponents.length > 0 ? orderedBomComponents : []).map(component => (
                   <button
@@ -2179,7 +2185,7 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
                 ))}
                 {bomInfo.components.length === 0 && (
                   <div className="wa-file">
-                    <span>暂无 BOM 数据</span>
+                    <span>{t("workspace.inspector.noBomData")}</span>
                     <small>-</small>
                   </div>
                 )}

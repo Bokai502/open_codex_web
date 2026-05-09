@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { APP_NAVIGATION_EVENT } from "../app/sessionUtils"
 import { AppleTaskComposer } from "../components/AppleTaskComposer"
 import { SessionModelPreview } from "../components/SessionModelPreview"
@@ -458,25 +459,26 @@ const SAMPLE_STYLE = `
 }
 `
 
-function formatSessionTime(createdAt: number) {
+function formatSampleSessionTime(createdAt: number, language: string, t: ReturnType<typeof useTranslation>["t"]) {
   const date = new Date(createdAt)
-  if (Number.isNaN(date.getTime())) return "最近"
+  if (Number.isNaN(date.getTime())) return t("common.recent")
 
   const today = new Date()
   const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()
   const startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
   const dayDiff = Math.round((startOfToday - startOfDate) / 86400000)
 
+  const locale = language.startsWith("en") ? "en-US" : "zh-CN"
   if (dayDiff === 0) {
-    return `今天 ${date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`
+    return `${t("common.today")} ${date.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })}`
   }
   if (dayDiff === 1) {
-    return `昨天 ${date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`
+    return `${t("common.yesterday")} ${date.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })}`
   }
-  return date.toLocaleDateString("zh-CN", { month: "long", day: "numeric" })
+  return date.toLocaleDateString(locale, { month: "long", day: "numeric" })
 }
 
-function getSessionStage(session: Session) {
+function getSessionStage(session: Session, t: ReturnType<typeof useTranslation>["t"]) {
   const events = session.turns.flatMap(turn => turn.events)
   const hasAskUser = events.some(event => (
     event.type === "item.started" ||
@@ -490,12 +492,12 @@ function getSessionStage(session: Session) {
   ) && (event.item.type === "command_execution" || event.item.type === "file_change"))
 
   if (hasAskUser && !session.dismissedAskUserId) {
-    return { label: "待确认", dotClass: "bg-[#b85f00]" }
+    return { label: t("home.stages.pending"), dotClass: "bg-[#b85f00]" }
   }
   if (hasWork) {
-    return { label: "已完成", dotClass: "bg-[#0f7f56]" }
+    return { label: t("home.stages.completed"), dotClass: "bg-[#0f7f56]" }
   }
-  return { label: "已保存", dotClass: "bg-[#0071e3]" }
+  return { label: t("home.stages.saved"), dotClass: "bg-[#0071e3]" }
 }
 
 function getVariantSize(variant: SampleThumbnailVariant) {
@@ -692,8 +694,9 @@ function SampleSessionCard({
   onSelect,
   onDelete,
 }: SampleSessionCardProps) {
-  const title = session.title.trim() || "未命名项目"
-  const stage = getSessionStage(session)
+  const { i18n, t } = useTranslation()
+  const title = session.title.trim() || t("common.unnamedProject")
+  const stage = getSessionStage(session, t)
   const producedCount = session.turns.reduce((total, turn) => {
     return total + turn.events.filter(event => (
       event.type === "item.completed" &&
@@ -705,7 +708,7 @@ function SampleSessionCard({
     <article className={`apple-sample-session${featured ? " featured" : ""}`}>
       <button
         type="button"
-        aria-label="删除对话"
+        aria-label={t("home.deleteConversation")}
         onClick={(event) => {
           event.stopPropagation()
           onDelete()
@@ -727,22 +730,22 @@ function SampleSessionCard({
         <div className="apple-sample-session-body">
           <div className="apple-sample-status">
             <span className={`apple-sample-dot ${stage.dotClass}`} />
-            <span>{stage.label} · {formatSessionTime(session.createdAt)}</span>
+            <span>{stage.label} · {formatSampleSessionTime(session.createdAt, i18n.language, t)}</span>
           </div>
 
           <h3>{title}</h3>
 
           {featured && (
             <div className="apple-sample-timeline">
-              {["布局", "建模", "仿真", "分析"].map(label => (
-                <span key={label}>{label}</span>
+              {["layout", "modeling", "simulation", "analysis"].map(key => (
+                <span key={key}>{t(`home.timeline.${key}`)}</span>
               ))}
             </div>
           )}
 
           <div className="apple-sample-meta">
-            <span>{session.turns.length || 1} 轮对话</span>
-            {featured && <span>{producedCount > 0 ? `${producedCount} 次文件更新` : "工作会话"}</span>}
+            <span>{t("home.turns", { count: session.turns.length || 1 })}</span>
+            {featured && <span>{producedCount > 0 ? t("home.fileUpdates", { count: producedCount }) : t("home.workSession")}</span>}
           </div>
         </div>
       </button>
@@ -755,6 +758,7 @@ interface WorkspaceHomePageProps {
 }
 
 export default function WorkspaceHomePage({ homePath = DEFAULT_HOME_PATH }: WorkspaceHomePageProps) {
+  const { t } = useTranslation()
   const workspaceState = useWorkspaceAppState({ homePath })
   const [historyPage, setHistoryPage] = useState(0)
   const {
@@ -792,16 +796,16 @@ export default function WorkspaceHomePage({ homePath = DEFAULT_HOME_PATH }: Work
       <header className="apple-sample-topbar">
         <div className="apple-sample-topbar-inner">
           <div className="apple-sample-left">
-            <button type="button" className="apple-sample-home-button" aria-label="返回 Home 页面" onClick={handleReturnHome}>
+            <button type="button" className="apple-sample-home-button" aria-label={t("home.backAria")} onClick={handleReturnHome}>
               <span>‹</span>
-              <span>首页</span>
+              <span>{t("common.home")}</span>
             </button>
           </div>
-          <nav aria-label="样例导航" className="apple-sample-nav">
-            <span>结构方案</span>
-            <span>仿真结果</span>
-            <span>历史对话</span>
-            <span>组件库</span>
+          <nav aria-label={t("home.nav.history")} className="apple-sample-nav">
+            <span>{t("home.nav.structures")}</span>
+            <span>{t("home.nav.simulation")}</span>
+            <span>{t("home.nav.history")}</span>
+            <span>{t("home.nav.library")}</span>
           </nav>
         </div>
       </header>
@@ -809,30 +813,30 @@ export default function WorkspaceHomePage({ homePath = DEFAULT_HOME_PATH }: Work
       <main className="apple-sample-shell">
         <section className="apple-sample-hero" aria-labelledby="apple-sample-hero-title">
           <div>
-            <div className="apple-sample-eyebrow">面向工程设计的智能工作流</div>
+            <div className="apple-sample-eyebrow">{t("home.eyebrow")}</div>
             <h1 id="apple-sample-hero-title">
-              把想法变成可查看、可复用的结构方案。
+              {t("home.title")}
             </h1>
             <p>
-              描述目标、上传约束文件、启用专业技能。系统会自动创建会话，并把布局、模型、仿真和分析结果沉淀成清晰的工作记录。
+              {t("home.description")}
             </p>
 
             <div className="apple-sample-composer">
               <AppleTaskComposer onSubmit={handleSubmit} onAbort={abort} running={running} />
             </div>
 
-            <div className="apple-sample-metrics" aria-label="工作台概览">
+            <div className="apple-sample-metrics" aria-label={t("home.overviewAria")}>
               <div className="apple-sample-metric">
                 <strong>{sortedSessions.length}</strong>
-                <span>条已保存会话，可继续生成、编辑与验证。</span>
+                <span>{t("home.savedSessionsMetric", { count: sortedSessions.length })}</span>
               </div>
               <div className="apple-sample-metric">
                 <strong>4</strong>
-                <span>类工作空间：模型、日志、物料与分析。</span>
+                <span>{t("home.workspaceMetric")}</span>
               </div>
               <div className="apple-sample-metric">
                 <strong>12</strong>
-                <span>个专业技能，可在输入框中快速启用。</span>
+                <span>{t("home.skillsMetric")}</span>
               </div>
             </div>
           </div>
@@ -841,26 +845,26 @@ export default function WorkspaceHomePage({ homePath = DEFAULT_HOME_PATH }: Work
         <section className="apple-sample-history" aria-labelledby="apple-sample-history-title">
           <div className="apple-sample-section-head">
             <div>
-              <h2 id="apple-sample-history-title">最近的历史对话</h2>
-              <p>用更高的信息密度展示会话状态、阶段进度和关键产物，便于快速回到上一次工作。</p>
+              <h2 id="apple-sample-history-title">{t("home.historyTitle")}</h2>
+              <p>{t("home.historyDescription")}</p>
             </div>
             <div className="apple-sample-history-actions">
               <button
                 type="button"
                 className="apple-sample-history-nav"
-                aria-label="查看上一页历史对话"
+                aria-label={t("home.previousHistory")}
                 disabled={!canGoPrevious}
                 onClick={() => setHistoryPage(page => Math.max(0, page - 1))}
               >
                 ‹
               </button>
               <span className="apple-sample-count">
-                已保存 {sortedSessions.length} 条 · {safeHistoryPage + 1}/{historyPageCount}
+                {t("home.savedCount", { count: sortedSessions.length, page: safeHistoryPage + 1, pages: historyPageCount })}
               </span>
               <button
                 type="button"
                 className="apple-sample-history-nav"
-                aria-label="查看更多历史对话"
+                aria-label={t("home.nextHistory")}
                 disabled={!canGoNext}
                 onClick={() => setHistoryPage(page => Math.min(historyPageCount - 1, page + 1))}
               >
@@ -871,8 +875,8 @@ export default function WorkspaceHomePage({ homePath = DEFAULT_HOME_PATH }: Work
 
           {visibleSessions.length === 0 ? (
             <div className="apple-sample-empty">
-              <strong>暂无保存的对话</strong>
-              <span>先从上方输入你的第一条任务，系统会自动为你创建新的工作会话。</span>
+              <strong>{t("home.emptyTitle")}</strong>
+              <span>{t("home.emptyDescription")}</span>
             </div>
           ) : (
             <div className="apple-sample-history-grid">

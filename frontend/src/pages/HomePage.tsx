@@ -1,4 +1,6 @@
 import Spline from "@splinetool/react-spline"
+import { useTranslation } from "react-i18next"
+import { LanguageSwitch } from "../components/LanguageSwitch"
 
 const SCENE_URL = "https://prod.spline.design/lZmPK4GMpqiyvhx0/scene.splinecode"
 
@@ -91,6 +93,11 @@ const STYLE = `
 .spline-nav a {
   color: inherit;
   text-decoration: none;
+}
+.spline-topbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
 }
 .spline-copy {
   position: relative;
@@ -245,53 +252,58 @@ const STYLE = `
 `
 
 export default function HomePage() {
+  const { t } = useTranslation()
+
   return (
     <main className="spline-page">
       <style>{STYLE}</style>
       <section className="spline-experience" aria-labelledby="spline-title">
-        <div className="spline-stage" aria-label="Spline 3D scene">
+        <div className="spline-stage" aria-label={t("landing.sceneAria")}>
           <Spline className="spline-scene" scene={SCENE_URL} />
         </div>
 
         <header className="spline-topbar">
-          <a className="spline-brand" href="/" aria-label="返回首页">
+          <a className="spline-brand" href="/" aria-label={t("landing.brandAria")}>
             <img className="spline-brand-mark" src="/logo_1.png" alt="" />
-            <span>AI 设计工作台</span>
+            <span>{t("landing.brand")}</span>
           </a>
-          <nav className="spline-nav" aria-label="页面导航">
-            <a href="/">首页</a>
-            <a href="/workspace">AI设计工作台</a>
-            <a href="/viewer">三维模型</a>
-            <a href="http://10.110.34.116:5173/" target="_blank" rel="noreferrer">数字地球</a>
-          </nav>
+          <div className="spline-topbar-actions">
+            <nav className="spline-nav" aria-label={t("landing.navAria")}>
+              <a href="/">{t("landing.nav.home")}</a>
+              <a href="/workspace">{t("landing.nav.workspace")}</a>
+              <a href="/viewer">{t("landing.nav.viewer")}</a>
+              <a href="http://10.110.34.116:5173/" target="_blank" rel="noreferrer">{t("landing.nav.earth")}</a>
+            </nav>
+            <LanguageSwitch />
+          </div>
         </header>
 
         <div className="spline-copy">
-          <div className="spline-kicker">工程设计智能工作流</div>
-          <h1 className="spline-title" id="spline-title">把想法变成可查看的结构方案</h1>
+          <div className="spline-kicker">{t("landing.kicker")}</div>
+          <h1 className="spline-title" id="spline-title">{t("landing.title")}</h1>
           <p className="spline-subtitle">
-            描述目标、上传约束文件、启用专业技能，让布局、模型与分析结果沉淀成可追踪的工作记录。
+            {t("landing.subtitle")}
           </p>
         </div>
 
-        <aside className="spline-dock" aria-label="工作台能力">
+        <aside className="spline-dock" aria-label={t("landing.capabilitiesAria")}>
           <div className="spline-dock-meta">
             <div className="spline-stat">
-              <strong>会话沉淀</strong>
-              <span>持续保存每轮设计过程</span>
+              <strong>{t("landing.stats.sessionsTitle")}</strong>
+              <span>{t("landing.stats.sessionsText")}</span>
             </div>
             <div className="spline-stat">
-              <strong>多视图工作区</strong>
-              <span>模型、日志、物料与分析联动</span>
+              <strong>{t("landing.stats.workspaceTitle")}</strong>
+              <span>{t("landing.stats.workspaceText")}</span>
             </div>
             <div className="spline-stat">
-              <strong>专业技能</strong>
-              <span>快速启用 FreeCAD 等能力</span>
+              <strong>{t("landing.stats.skillsTitle")}</strong>
+              <span>{t("landing.stats.skillsText")}</span>
             </div>
           </div>
           <div className="spline-actions">
-            <a className="spline-button primary" href="/workspace">进入AI设计工作台</a>
-            <a className="spline-button primary" href="http://10.110.34.116:5173/" target="_blank" rel="noreferrer">进入AI GNC工作台</a>
+            <a className="spline-button primary" href="/workspace">{t("landing.actions.workspace")}</a>
+            <a className="spline-button primary" href="http://10.110.34.116:5173/" target="_blank" rel="noreferrer">{t("landing.actions.gnc")}</a>
           </div>
         </aside>
       </section>
