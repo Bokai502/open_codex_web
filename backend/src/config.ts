@@ -9,6 +9,10 @@ export interface AppConfig {
     apiKey: string
     baseUrl: string
     model: string | null
+    modelProvider: string | null
+    modelProviderName: string | null
+    wireApi: string | null
+    supportsWebsockets: boolean | null
   }
   codex: {
     modelReasoningEffort: "minimal" | "low" | "medium" | "high" | "xhigh"
@@ -44,6 +48,18 @@ const DEFAULT_CORS_ORIGINS = [
   "https://127.0.0.1:5175",
 ]
 
+type RawOpenAiConfig = Partial<AppConfig["openai"]> & {
+  base_url?: unknown
+  model_provider?: unknown
+  model_provider_name?: unknown
+  wire_api?: unknown
+  supports_websockets?: unknown
+}
+
+type RawConfig = Partial<AppConfig> & {
+  openai?: RawOpenAiConfig
+}
+
 function die(msg: string): never {
   process.stderr.write(`\n[config] ${msg}\n\n`)
   process.exit(1)
@@ -75,6 +91,24 @@ function normalizeCorsOrigin(
   die("server.corsOrigin 必须是字符串或字符串数组。")
 }
 
+function optionalString(value: unknown, field: string): string | null {
+  if (value == null) return null
+  if (typeof value !== "string") die(`${field} 必须是字符串。`)
+  const trimmed = value.trim()
+  return trimmed || null
+}
+
+function optionalBoolean(value: unknown, field: string): boolean | null {
+  if (value == null) return null
+  if (typeof value === "boolean") return value
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase()
+    if (normalized === "true") return true
+    if (normalized === "false") return false
+  }
+  die(`${field} 必须是布尔值 true/false。`)
+}
+
 export function loadConfig(): AppConfig {
   if (!fs.existsSync(CONFIG_FILE)) {
     die(
@@ -90,15 +124,23 @@ export function loadConfig(): AppConfig {
     die(`config.json 不是合法 JSON: ${err instanceof Error ? err.message : String(err)}`)
   }
 
-  const cfg = raw as Partial<AppConfig>
+  const cfg = raw as RawConfig
 
   // env 覆盖（方便 CI / 临时切换）
   const envKey = process.env.OPENAI_API_KEY
   const envBase = process.env.OPENAI_BASE_URL
 
-  const apiKey = (envKey ?? cfg.openai?.apiKey ?? "").trim()
-  const baseUrl = (envBase ?? cfg.openai?.baseUrl ?? "").trim()
-  const model = cfg.openai?.model ?? null
+  const openai: RawOpenAiConfig = cfg.openai ?? {}
+  const apiKey = (envKey ?? openai.apiKey ?? "").trim()
+  const baseUrl = (envBase ?? openai.baseUrl ?? optionalString(openai.base_url, "openai.base_url") ?? "").trim()
+  const model = optionalString(openai.model, "openai.model")
+  const modelProvider = optionalString(openai.modelProvider ?? openai.model_provider, "openai.modelProvider")
+  const modelProviderName = optionalString(openai.modelProviderName ?? openai.model_provider_name, "openai.modelProviderName")
+  const wireApi = optionalString(openai.wireApi ?? openai.wire_api, "openai.wireApi")
+  const supportsWebsockets = optionalBoolean(
+    openai.supportsWebsockets ?? openai.supports_websockets,
+    "openai.supportsWebsockets",
+  )
 
   if (!apiKey) die("openai.apiKey 未设置（或为空）。")
   if (apiKey === "sk-REPLACE-ME") die("openai.apiKey 仍是占位符，请填真实 key。")
@@ -111,7 +153,15 @@ export function loadConfig(): AppConfig {
   const logging = cfg.logging ?? {} as Partial<AppConfig["logging"]>
 
   return {
-    openai: { apiKey, baseUrl, model },
+    openai: {
+      apiKey,
+      baseUrl,
+      model,
+      modelProvider,
+      modelProviderName,
+      wireApi,
+      supportsWebsockets,
+    },
     codex: {
       modelReasoningEffort: codex.modelReasoningEffort ?? "medium",
       approvalPolicy: codex.approvalPolicy ?? "never",

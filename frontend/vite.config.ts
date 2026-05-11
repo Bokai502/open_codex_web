@@ -17,6 +17,8 @@ type RootConfig = {
   }
 }
 
+const DEFAULT_BACKEND_PORT = 3001
+
 function loadRootConfig(): RootConfig {
   const configPath = path.resolve(__dirname, "..", "..", "config.json")
   try {
@@ -29,10 +31,13 @@ function loadRootConfig(): RootConfig {
 export default defineConfig(({ mode }) => {
   const useHttps = mode === "https-dev"
   const rootConfig = loadRootConfig()
-  const backendPort = rootConfig.server?.port ?? 3001
+  const backendPort = rootConfig.server?.port ?? DEFAULT_BACKEND_PORT
   const frontend = rootConfig.frontend ?? {}
 
   return {
+    define: {
+      __BACKEND_PORT__: JSON.stringify(backendPort),
+    },
     plugins: [
       tailwindcss(),
       react(),

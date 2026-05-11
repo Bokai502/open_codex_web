@@ -32,6 +32,52 @@ function getInputPromptText(input: string | CodexInputItem[]) {
   return input.map(item => item.type === "local_image" ? "[image]" : "").filter(Boolean).join(" ")
 }
 
+async function deleteSessionRequest(sessionId: string) {
+  const deletePath = `/api/sessions/${encodeURIComponent(sessionId)}/delete`
+  const legacyDeletePath = `/api/sessions/${encodeURIComponent(sessionId)}`
+  const apiRequests = [
+    { method: "POST", path: deletePath },
+    { method: "DELETE", path: legacyDeletePath },
+  ]
+  const apiUrls = apiRequests.flatMap(request => {
+    const urls = [{ ...request, url: request.path }]
+
+    if (window.location.hostname && window.location.protocol === "http:") {
+      urls.push({
+        ...request,
+        url: `http://${window.location.hostname}:${__BACKEND_PORT__}${request.path}`,
+      })
+    }
+
+    return urls
+  })
+
+  let lastError: unknown = null
+
+  for (const { method, url } of apiUrls) {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const response = await fetch(url, {
+          method,
+          cache: "no-store",
+        })
+        if (response.ok) return
+        lastError = new Error(`delete failed with status ${response.status}`)
+        console.warn("[sessions] delete request failed", { attempt: attempt + 1, method, status: response.status, url })
+      } catch (err) {
+        lastError = err
+        console.warn("[sessions] delete request errored", { attempt: attempt + 1, err, method, url })
+      }
+
+      if (attempt === 0) {
+        await new Promise(resolve => window.setTimeout(resolve, 300))
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("delete failed")
+}
+
 export function useWorkspaceAppState({ homePath }: WorkspaceAppStateOptions = {}) {
   const [sessions, setSessions] = useState<Session[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(() => getSessionIdFromPath(window.location.pathname, homePath))
@@ -48,6 +94,7 @@ export function useWorkspaceAppState({ homePath }: WorkspaceAppStateOptions = {}
   const batchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hasLoadedSessionsRef = useRef(false)
   const sessionSaveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  const deletedSessionIdsRef = useRef<Set<string>>(new Set())
 
   const { run, abort } = useCodexStream()
 
@@ -98,6 +145,7 @@ export function useWorkspaceAppState({ homePath }: WorkspaceAppStateOptions = {}
 
   const saveSession = useCallback((session: Session, immediate = false) => {
     if (!hasLoadedSessionsRef.current) return
+    if (deletedSessionIdsRef.current.has(session.id)) return
     const timers = sessionSaveTimersRef.current
     const existingTimer = timers.get(session.id)
     if (existingTimer) clearTimeout(existingTimer)
@@ -122,16 +170,13 @@ export function useWorkspaceAppState({ homePath }: WorkspaceAppStateOptions = {}
   }, [])
 
   const deleteSession = useCallback((sessionId: string) => {
+    deletedSessionIdsRef.current.add(sessionId)
     const existingTimer = sessionSaveTimersRef.current.get(sessionId)
     if (existingTimer) {
       clearTimeout(existingTimer)
       sessionSaveTimersRef.current.delete(sessionId)
     }
-    fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
-      method: "DELETE",
-    }).catch(() => {
-      // ignore network errors
-    })
+    return deleteSessionRequest(sessionId)
   }, [])
 
   const activeSession = findActiveSession(sessions, activeSessionId)
@@ -181,13 +226,13 @@ export function useWorkspaceAppState({ homePath }: WorkspaceAppStateOptions = {}
     }))
   }, [saveSession])
 
-  const handleDelete = useCallback((id: string) => {
+  const handleDelete = useCallback(async (id: string) => {
     if (id === activeSessionIdRef.current && running) {
       abort()
     }
 
+    const previousSessions = sessionsRef.current
     setSessions(prev => prev.filter(session => session.id !== id))
-    deleteSession(id)
 
     if (activeSessionIdRef.current === id) {
       if (batchTimerRef.current) {
@@ -198,6 +243,14 @@ export function useWorkspaceAppState({ homePath }: WorkspaceAppStateOptions = {}
       activeSessionIdRef.current = null
       updateBrowserPath(null, false, homePath)
       resetLiveTurn()
+    }
+
+    try {
+      await deleteSession(id)
+    } catch (err) {
+      deletedSessionIdsRef.current.delete(id)
+      setSessions(previousSessions)
+      throw err
     }
   }, [abort, deleteSession, homePath, resetLiveTurn, running])
 

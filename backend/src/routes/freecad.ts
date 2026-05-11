@@ -50,6 +50,7 @@ type RunManifest = {
   }
   inputs?: {
     doc_name?: string
+    output_path?: string
     input_format?: string
   }
   artifacts?: RunArtifact[]
@@ -64,6 +65,8 @@ type RenderableModel = {
   glbPath: string
   version: string
 }
+
+type ProgressData = NonNullable<Awaited<ReturnType<typeof buildProgressDataFromManifest>>>
 
 type RegistryLocation = {
   registryDir: string
@@ -171,6 +174,21 @@ async function readRunManifest(location: RegistryLocation, relativePath: string)
   }
 }
 
+async function listRunManifestRefs(location: RegistryLocation) {
+  const refs = new Set<string>()
+  const index = await readRegistryIndex(location).catch(() => null)
+  for (const manifestRef of Object.values(index?.runs ?? {})) refs.add(manifestRef)
+
+  const runsDir = path.join(location.registryDir, "runs")
+  const entries = await fs.readdir(runsDir, { withFileTypes: true }).catch(() => [])
+  for (const entry of entries) {
+    if (!entry.isFile() || path.extname(entry.name).toLowerCase() !== ".json") continue
+    refs.add(path.join("runs", entry.name))
+  }
+
+  return [...refs]
+}
+
 async function getFileVersion(filePath: string) {
   const stat = await fs.stat(filePath)
   return {
@@ -258,6 +276,20 @@ function resolveAssemblyBuildOutputPath(
   )
 }
 
+function resolveInputOutputSiblingPath(
+  manifest: RunManifest,
+  extension: ".glb" | ".step",
+  workspaceDir: string,
+) {
+  const outputPath = manifest.inputs?.output_path
+  if (!isNonEmptyString(outputPath)) return null
+
+  const resolvedOutputPath = resolveScopedWorkspaceFilePath(outputPath, workspaceDir)
+  if (!resolvedOutputPath) return null
+
+  return resolvedOutputPath.slice(0, -path.extname(resolvedOutputPath).length) + extension
+}
+
 async function resolveModelFromGlbPath(glbPath: string | undefined) {
   if (!isNonEmptyString(glbPath)) return null
 
@@ -331,6 +363,9 @@ function resolveGlbPath(
   const artifactPath = resolveScopedWorkspaceFilePath(glbArtifact?.path, workspaceDir)
   if (artifactPath) return artifactPath
 
+  const inputOutputSiblingPath = resolveInputOutputSiblingPath(manifest, ".glb", workspaceDir)
+  if (inputOutputSiblingPath) return inputOutputSiblingPath
+
   if (!buildFinished) return null
 
   return resolveScopedAssemblyArtifactPath(
@@ -392,20 +427,22 @@ async function resolveModelFromRegistry(sessionId?: string, runId?: string, vari
     for (const location of locations) {
       const index = await readRegistryIndex(location).catch(() => null)
       const manifestRef = index?.runs?.[runId]
-      if (!manifestRef) continue
+      const manifestRefs = manifestRef ? [manifestRef] : await listRunManifestRefs(location)
 
-      const manifestRecord = await readRunManifest(location, manifestRef).catch(() => null)
-      if (!manifestRecord) continue
+      for (const manifestRef of manifestRefs) {
+        const manifestRecord = await readRunManifest(location, manifestRef).catch(() => null)
+        if (!manifestRecord) continue
 
-      const model = await resolveRenderableModelFromManifest(
-        manifestRecord.manifest,
-        variant,
-        workspaceDir,
-        assemblyBuildsDir,
-        sessionId,
-        runId,
-      )
-      if (model) return model
+        const model = await resolveRenderableModelFromManifest(
+          manifestRecord.manifest,
+          variant,
+          workspaceDir,
+          assemblyBuildsDir,
+          sessionId,
+          runId,
+        )
+        if (model) return model
+      }
     }
     return null
   }
@@ -413,7 +450,7 @@ async function resolveModelFromRegistry(sessionId?: string, runId?: string, vari
   if (isNonEmptyString(sessionId)) {
     for (const location of locations) {
       const index = await readRegistryIndex(location).catch(() => null)
-      const sessionRuns = index?.sessions?.[sessionId] ?? []
+      const sessionRuns = index?.sessions?.[sessionId] ?? await listRunManifestRefs(location)
 
       for (const manifestRef of [...sessionRuns].reverse()) {
         const manifestRecord = await readRunManifest(location, manifestRef).catch(() => null)
@@ -434,8 +471,7 @@ async function resolveModelFromRegistry(sessionId?: string, runId?: string, vari
 
   const candidates: RenderableModel[] = []
   for (const location of locations) {
-    const index = await readRegistryIndex(location).catch(() => null)
-    const manifestRefs = Object.values(index?.runs ?? {})
+    const manifestRefs = await listRunManifestRefs(location)
 
     for (const manifestRef of manifestRefs) {
       const manifestRecord = await readRunManifest(location, manifestRef).catch(() => null)
@@ -564,24 +600,49 @@ async function resolveProgressFromLatestSessionRun(sessionId: string) {
   for (const location of locations) {
     const index = await readRegistryIndex(location).catch(() => null)
     const sessionRuns = index?.sessions?.[sessionId] ?? []
+    let fallbackGlb: { path: string | null; exists: boolean } | null = null
+    let latestProgress: {
+      data: ProgressData
+      manifestPath: string
+    } | null = null
 
     for (const manifestRef of [...sessionRuns].reverse()) {
       const manifestRecord = await readRunManifest(location, manifestRef).catch(() => null)
       if (!manifestRecord) continue
+
+      if (!fallbackGlb) {
+        const outputFiles = await buildOutputFilesFromManifest(
+          manifestRecord.manifest,
+          workspaceDir,
+          assemblyBuildsDir,
+        )
+        if (outputFiles.glb?.exists === true) fallbackGlb = outputFiles.glb
+      }
 
       const data = await buildProgressDataFromManifest(
         manifestRecord.manifest,
         workspaceDir,
         assemblyBuildsDir,
       )
-      if (!data) continue
+      if (!data || latestProgress) continue
 
-      const fileVersion = await getFileVersion(manifestRecord.manifestPath).catch(() => null)
-      return {
+      if (data.output_files.glb?.exists !== true && fallbackGlb) {
+        data.output_files.glb = fallbackGlb
+      }
+
+      latestProgress = {
         data,
-        sourcePath: manifestRecord.manifestPath,
+        manifestPath: manifestRecord.manifestPath,
+      }
+    }
+
+    if (latestProgress) {
+      const fileVersion = await getFileVersion(latestProgress.manifestPath).catch(() => null)
+      return {
+        data: latestProgress.data,
+        sourcePath: latestProgress.manifestPath,
         sourceVersion: fileVersion
-          ? [manifestRecord.manifestPath, fileVersion.mtimeMs, fileVersion.size].join(":")
+          ? [latestProgress.manifestPath, fileVersion.mtimeMs, fileVersion.size].join(":")
           : null,
       }
     }

@@ -15,6 +15,9 @@ export const resources = {
         unnamedSession: "Untitled session",
         component: "Component",
         none: "-",
+        cancel: "Cancel",
+        delete: "Delete",
+        deleting: "Deleting...",
       },
       composer: {
         ariaLabel: "Task input",
@@ -49,6 +52,10 @@ export const resources = {
         emptyTitle: "No saved conversations",
         emptyDescription: "Start with your first task above and the system will create a new work session automatically.",
         deleteConversation: "Delete conversation",
+        deleteConfirm: "Delete \"{{title}}\"? This only removes the saved conversation history.",
+        deleteDialogTitle: "Delete this conversation?",
+        deleteDialogDescription: "The saved conversation \"{{title}}\" will be removed from history. Workspace files and generated artifacts are kept.",
+        deleteFailed: "Delete failed. Check the connection and try again.",
         stages: {
           pending: "Needs confirmation",
           completed: "Completed",
@@ -257,6 +264,9 @@ export const resources = {
         unnamedSession: "未命名会话",
         component: "组件",
         none: "-",
+        cancel: "取消",
+        delete: "删除",
+        deleting: "正在删除...",
       },
       composer: {
         ariaLabel: "任务输入",
@@ -291,6 +301,10 @@ export const resources = {
         emptyTitle: "暂无保存的对话",
         emptyDescription: "先从上方输入你的第一条任务，系统会自动为你创建新的工作会话。",
         deleteConversation: "删除对话",
+        deleteConfirm: "删除“{{title}}”？这只会移除保存的对话历史。",
+        deleteDialogTitle: "删除这条历史对话？",
+        deleteDialogDescription: "保存的对话“{{title}}”将从历史记录中移除。工作区文件和已生成产物会保留。",
+        deleteFailed: "删除失败，请检查连接后重试。",
         stages: {
           pending: "待确认",
           completed: "已完成",

@@ -377,18 +377,31 @@ const SAMPLE_STYLE = `
   top: 16px;
   right: 16px;
   z-index: 2;
-  display: grid;
-  width: 34px;
-  height: 34px;
+  display: inline-grid;
+  width: 40px;
+  height: 40px;
   place-items: center;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(0, 0, 0, 0.075);
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86), 0 10px 26px rgba(0, 0, 0, 0.1);
   color: #6e6e73;
-  opacity: 0;
-  transition: opacity 160ms ease;
+  cursor: pointer;
+  backdrop-filter: blur(18px) saturate(180%);
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
 }
-.apple-sample-session:hover .apple-sample-delete { opacity: 1; }
+.apple-sample-delete svg {
+  width: 17px;
+  height: 17px;
+  stroke-width: 2;
+}
+.apple-sample-delete:hover {
+  border-color: rgba(255, 59, 48, 0.26);
+  background: rgba(255, 245, 244, 0.96);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92), 0 14px 32px rgba(180, 35, 24, 0.14);
+  color: #b42318;
+  transform: translateY(-1px);
+}
 .apple-sample-timeline {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -426,6 +439,98 @@ const SAMPLE_STYLE = `
   margin-top: 8px;
   font-size: 15px;
   line-height: 1.8;
+}
+.apple-delete-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(29, 29, 31, 0.24);
+  backdrop-filter: blur(18px) saturate(160%);
+}
+.apple-delete-dialog {
+  width: min(420px, 100%);
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.22);
+}
+.apple-delete-dialog-body {
+  padding: 28px 28px 22px;
+}
+.apple-delete-dialog-icon {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  margin-bottom: 18px;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(255, 59, 48, 0.1);
+  color: #b42318;
+}
+.apple-delete-dialog-icon svg {
+  width: 20px;
+  height: 20px;
+}
+.apple-delete-dialog h3 {
+  margin: 0;
+  color: #1d1d1f;
+  font-size: 21px;
+  font-weight: 760;
+  line-height: 1.25;
+}
+.apple-delete-dialog p {
+  margin: 10px 0 0;
+  color: #6e6e73;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.apple-delete-dialog-error {
+  display: block;
+  margin-top: 12px;
+  color: #b42318;
+  font-size: 13px;
+  font-weight: 720;
+}
+.apple-delete-dialog strong {
+  color: #2b2b2d;
+  font-weight: 760;
+}
+.apple-delete-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 18px 18px;
+  background: rgba(245, 245, 247, 0.72);
+}
+.apple-delete-dialog-actions button {
+  height: 38px;
+  border-radius: 999px;
+  cursor: pointer;
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 760;
+}
+.apple-delete-dialog-actions button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+.apple-delete-dialog-cancel {
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.82);
+  color: #3f3f44;
+}
+.apple-delete-dialog-danger {
+  border: 1px solid rgba(255, 59, 48, 0.2);
+  background: #d92d20;
+  color: white;
+  box-shadow: 0 10px 24px rgba(217, 45, 32, 0.24);
+}
+.apple-delete-dialog-danger:hover {
+  background: #b42318;
 }
 @media (max-width: 860px) {
   .apple-sample-topbar-inner,
@@ -714,8 +819,16 @@ function SampleSessionCard({
           onDelete()
         }}
         className="apple-sample-delete"
+        title={t("home.deleteConversation")}
       >
-        ×
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M9 5h6" />
+          <path d="M10 5l1-2h2l1 2" />
+          <path d="M5 7h14" />
+          <path d="M7 7l1 14h8l1-14" />
+          <path d="M10 11v6" />
+          <path d="M14 11v6" />
+        </svg>
       </button>
 
       <button type="button" onClick={onSelect} className="apple-sample-session-action">
@@ -761,6 +874,9 @@ export default function WorkspaceHomePage({ homePath = DEFAULT_HOME_PATH }: Work
   const { t } = useTranslation()
   const workspaceState = useWorkspaceAppState({ homePath })
   const [historyPage, setHistoryPage] = useState(0)
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null)
+  const [deleteError, setDeleteError] = useState("")
+  const [deletePending, setDeletePending] = useState(false)
   const {
     activeSessionId,
     handleDelete,
@@ -887,13 +1003,71 @@ export default function WorkspaceHomePage({ homePath = DEFAULT_HOME_PATH }: Work
                   featured={!isMobile && index === 0}
                   previewPriority={index < 3}
                   onSelect={() => handleSelect(session.id)}
-                  onDelete={() => handleDelete(session.id)}
+                  onDelete={() => {
+                    setDeleteError("")
+                    setDeleteTarget({
+                      id: session.id,
+                      title: session.title.trim() || t("common.unnamedProject"),
+                    })
+                  }}
                 />
               ))}
             </div>
           )}
         </section>
       </main>
+
+      {deleteTarget && (
+        <div className="apple-delete-dialog-backdrop" role="presentation" onClick={() => !deletePending && setDeleteTarget(null)}>
+          <section
+            aria-labelledby="apple-delete-dialog-title"
+            aria-modal="true"
+            className="apple-delete-dialog"
+            role="dialog"
+            onClick={event => event.stopPropagation()}
+          >
+            <div className="apple-delete-dialog-body">
+              <div className="apple-delete-dialog-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 5h6" />
+                  <path d="M10 5l1-2h2l1 2" />
+                  <path d="M5 7h14" />
+                  <path d="M7 7l1 14h8l1-14" />
+                  <path d="M10 11v6" />
+                  <path d="M14 11v6" />
+                </svg>
+              </div>
+              <h3 id="apple-delete-dialog-title">{t("home.deleteDialogTitle")}</h3>
+              <p>{t("home.deleteDialogDescription", { title: deleteTarget.title })}</p>
+              {deleteError && <span className="apple-delete-dialog-error">{deleteError}</span>}
+            </div>
+            <div className="apple-delete-dialog-actions">
+              <button type="button" className="apple-delete-dialog-cancel" disabled={deletePending} onClick={() => setDeleteTarget(null)}>
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                className="apple-delete-dialog-danger"
+                disabled={deletePending}
+                onClick={async () => {
+                  setDeletePending(true)
+                  setDeleteError("")
+                  try {
+                    await handleDelete(deleteTarget.id)
+                    setDeleteTarget(null)
+                  } catch {
+                    setDeleteError(t("home.deleteFailed"))
+                  } finally {
+                    setDeletePending(false)
+                  }
+                }}
+              >
+                {deletePending ? t("common.deleting") : t("common.delete")}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   )
 }

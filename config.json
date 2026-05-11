@@ -2,7 +2,11 @@
   "openai": {
     "apiKey": "sk-01f00d9c043299446e9835312ecd113a4f8be8aabb3abf090c8fd72496f5c447",
     "baseUrl": "https://api.nexahubai.com/v1",
-    "model": "gpt-5.5"
+    "model": "gpt-5.5",
+    "modelProvider": "nexahub",
+    "modelProviderName": "NexaHub",
+    "wireApi": "responses",
+    "supportsWebsockets": false
   },
   "codex": {
     "modelReasoningEffort": "low",

@@ -3,24 +3,35 @@ import { useTranslation } from "react-i18next"
 import { AppleTaskComposer } from "../components/AppleTaskComposer"
 import { APP_NAVIGATION_EVENT, formatSessionTime } from "../app/sessionUtils"
 import { createImageUrl } from "../components/bomData"
-import { MarkdownText } from "../components/outputMarkdown"
 import { useBomInfo } from "../hooks/useBomInfo"
 import { useWorkspaceAppState } from "../hooks/useWorkspaceAppState"
-import type { CodexInputItem, Session, ThreadEvent, Turn } from "../types"
+import type { CodexInputItem, Session } from "../types"
+import { AgentUnderstandingPanel } from "./workspace/AgentUnderstandingPanel"
+import { RunLogPanel } from "./workspace/RunLogPanel"
+import {
+  formatProgressUpdatedAt,
+  getFileNames,
+  getLatestSessionGlbPath,
+  getProgressEntries,
+  getProgressFiles,
+  getViewerGlbPath,
+  getWorkflowProgressEntries,
+  type FreecadProgressResponse,
+} from "./workspace/progressUtils"
+import {
+  formatStageLogTime,
+  getDisplayLogEntries,
+  getRunLogEntries,
+  type RunLogEntry,
+  type StageLogEntry,
+} from "./workspace/runLogUtils"
+import "./workspace/WorkspaceSessionPage.css"
 
 const WORKSPACE_HOME_PATH = "/workspace"
 
 type ViewerComponentMessage = {
   componentId?: unknown
   type?: unknown
-}
-
-type FreecadProgressResponse = {
-  exists?: boolean
-  data?: unknown
-  source_path?: string | null
-  source_version?: string | null
-  updated_at?: string | null
 }
 
 type FreecadWorkspaceItem = {
@@ -45,1477 +56,12 @@ type WorkspaceSessionGroup = FreecadWorkspaceItem & {
 
 const UNASSIGNED_WORKSPACE_NAME = "__unassigned__"
 
-type ProgressEntry = {
-  fileNames: string[]
-  key: string
-  label: string
-  percent: number
-}
-
-const WORKFLOW_PROGRESS_STAGES: ProgressEntry[] = [
-  { fileNames: [], key: "layout", label: "workspace.progress.layout", percent: 0 },
-  { fileNames: [], key: "modeling", label: "workspace.progress.modeling", percent: 0 },
-  { fileNames: [], key: "export_file_percent", label: "workspace.progress.exportFile", percent: 0 },
-  { fileNames: [], key: "case_build", label: "workspace.progress.caseBuild", percent: 0 },
-  { fileNames: [], key: "simulation_run", label: "workspace.progress.simulationRun", percent: 0 },
-  { fileNames: [], key: "field_export", label: "workspace.progress.fieldExport", percent: 0 },
-  { fileNames: [], key: "analysis", label: "workspace.progress.analysis", percent: 0 },
-  { fileNames: [], key: "suggestion", label: "workspace.progress.suggestion", percent: 0 },
-]
-
 type ActivePanel = "bom" | "log" | "model" | "freecad" | "paraview" | "comsol"
-
-const STYLE = `
-.workspace-apple {
-  min-height: 100vh;
-  overflow: hidden;
-  background:
-    radial-gradient(circle at 52% 0%, rgba(120, 177, 255, 0.18), transparent 34%),
-    linear-gradient(180deg, #fbfbfd 0%, #f5f5f7 46%, #f1f1f3 100%);
-  color: #1d1d1f;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
-}
-.workspace-apple button,
-.workspace-apple textarea { font: inherit; }
-.wa-topbar {
-  position: relative;
-  z-index: 100;
-  height: 52px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-  background: rgba(251, 251, 253, 0.78);
-  backdrop-filter: blur(24px) saturate(180%);
-}
-.wa-topbar-inner {
-  position: relative;
-  display: flex;
-  width: 100%;
-  height: 100%;
-  align-items: center;
-  justify-content: space-between;
-}
-.wa-nav-left {
-  display: inline-flex;
-  align-items: center;
-  gap: 14px;
-}
-.wa-back-button {
-  display: inline-flex;
-  height: 36px;
-  align-items: center;
-  gap: 9px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.72);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82), 0 8px 20px rgba(0, 0, 0, 0.06);
-  color: #3f3f44;
-  cursor: pointer;
-  padding: 0 13px 0 8px;
-  font-size: 12px;
-  font-weight: 700;
-}
-.wa-back-button:hover { background: rgba(255, 255, 255, 0.9); color: #1d1d1f; }
-.wa-back-button span:first-child {
-  display: grid;
-  width: 24px;
-  height: 24px;
-  place-items: center;
-  border-radius: 50%;
-  background: #1d1d1f;
-  color: white;
-  font-size: 15px;
-  line-height: 1;
-}
-.wa-history-menu {
-  position: relative;
-}
-.wa-history-button {
-  display: inline-flex;
-  height: 36px;
-  align-items: center;
-  gap: 7px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.72);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82), 0 8px 20px rgba(0, 0, 0, 0.06);
-  color: #3f3f44;
-  cursor: pointer;
-  padding: 0 13px;
-  font-size: 12px;
-  font-weight: 700;
-}
-.wa-history-button:hover { background: rgba(255, 255, 255, 0.9); color: #1d1d1f; }
-.wa-history-dropdown {
-  position: absolute;
-  left: 0;
-  top: calc(100% + 8px);
-  z-index: 240;
-  width: min(360px, calc(100vw - 28px));
-  overflow: hidden;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.95);
-  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.16);
-  backdrop-filter: blur(24px) saturate(180%);
-  padding: 8px;
-}
-.wa-history-item {
-  display: block;
-  width: 100%;
-  min-height: 54px;
-  border: 0;
-  border-radius: 12px;
-  background: transparent;
-  padding: 9px 10px;
-  text-align: left;
-  cursor: pointer;
-}
-.wa-history-item:hover,
-.wa-history-item.active { background: rgba(0, 0, 0, 0.05); }
-.wa-history-item strong {
-  display: block;
-  overflow: hidden;
-  color: #1d1d1f;
-  font-size: 12.5px;
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.wa-history-item span {
-  display: block;
-  margin-top: 4px;
-  color: #86868b;
-  font-size: 11px;
-  font-weight: 650;
-}
-.wa-history-more {
-  width: 100%;
-  height: 32px;
-  margin-top: 4px;
-  border: 0;
-  border-radius: 10px;
-  background: rgba(0, 0, 0, 0.045);
-  color: #55555a;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 700;
-}
-.wa-workspace-menu {
-  position: relative;
-}
-.wa-workspace-button {
-  display: inline-flex;
-  height: 36px;
-  max-width: 220px;
-  align-items: center;
-  gap: 7px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.72);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82), 0 8px 20px rgba(0, 0, 0, 0.06);
-  color: #3f3f44;
-  cursor: pointer;
-  padding: 0 13px;
-  font-size: 12px;
-  font-weight: 700;
-}
-.wa-workspace-button:hover { background: rgba(255, 255, 255, 0.9); color: #1d1d1f; }
-.wa-workspace-button span:first-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.wa-workspace-dropdown {
-  position: absolute;
-  left: 0;
-  top: calc(100% + 8px);
-  z-index: 240;
-  display: grid;
-  grid-template-columns: 240px minmax(260px, 360px);
-  gap: 8px;
-  width: min(620px, calc(100vw - 28px));
-  overflow: hidden;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.95);
-  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.16);
-  backdrop-filter: blur(24px) saturate(180%);
-  padding: 8px;
-}
-.wa-workspace-list,
-.wa-workspace-history {
-  min-width: 0;
-}
-.wa-workspace-history {
-  border-left: 1px solid rgba(0, 0, 0, 0.07);
-  padding-left: 8px;
-}
-.wa-workspace-item {
-  display: block;
-  width: 100%;
-  min-height: 46px;
-  border: 0;
-  border-radius: 12px;
-  background: transparent;
-  padding: 8px 10px;
-  text-align: left;
-  cursor: pointer;
-}
-.wa-workspace-item:hover,
-.wa-workspace-item.active { background: rgba(0, 0, 0, 0.05); }
-.wa-workspace-item:disabled { cursor: not-allowed; opacity: 0.48; }
-.wa-workspace-item strong {
-  display: block;
-  color: #1d1d1f;
-  font-size: 12.5px;
-  line-height: 1.25;
-}
-.wa-workspace-item span {
-  display: block;
-  margin-top: 4px;
-  overflow: hidden;
-  color: #86868b;
-  font-size: 11px;
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.wa-workspace-history-title {
-  height: 28px;
-  padding: 4px 10px 0;
-  color: #55555a;
-  font-size: 11px;
-  font-weight: 800;
-}
-.wa-workspace-session {
-  display: block;
-  width: 100%;
-  min-height: 50px;
-  border: 0;
-  border-radius: 12px;
-  background: transparent;
-  padding: 8px 10px;
-  text-align: left;
-  cursor: pointer;
-}
-.wa-workspace-session:hover,
-.wa-workspace-session.active { background: rgba(0, 0, 0, 0.05); }
-.wa-workspace-session strong {
-  display: block;
-  overflow: hidden;
-  color: #1d1d1f;
-  font-size: 12.5px;
-  line-height: 1.32;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.wa-workspace-session span {
-  display: block;
-  margin-top: 4px;
-  color: #86868b;
-  font-size: 11px;
-  font-weight: 650;
-}
-.wa-tabs {
-  position: absolute;
-  left: 50%;
-  display: inline-flex;
-  transform: translateX(-50%);
-  overflow: visible;
-  border: 1px solid rgba(0, 0, 0, 0.07);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.66);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
-}
-.wa-tabs button {
-  height: 34px;
-  min-width: 86px;
-  border: 0;
-  background: transparent;
-  color: #5d5d62;
-  font-size: 12px;
-  font-weight: 650;
-}
-.wa-tabs button.active { background: #1d1d1f; color: white; border-radius: 999px; }
-.wa-tool-menu { position: relative; }
-.wa-tool-panel {
-  position: absolute;
-  left: 50%;
-  top: calc(100% + 8px);
-  z-index: 200;
-  display: none;
-  min-width: 170px;
-  transform: translateX(-50%);
-  overflow: hidden;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.14);
-  backdrop-filter: blur(24px) saturate(180%);
-  padding: 6px;
-}
-.wa-tool-menu:hover .wa-tool-panel,
-.wa-tool-menu:focus-within .wa-tool-panel { display: grid; gap: 4px; }
-.wa-tool-panel a,
-.wa-tool-panel button {
-  display: flex;
-  width: 100%;
-  height: 38px;
-  align-items: center;
-  justify-content: space-between;
-  border: 0;
-  border-radius: 12px;
-  background: transparent;
-  padding: 0 11px;
-  color: #1d1d1f;
-  font-size: 13px;
-  font-weight: 650;
-  text-decoration: none;
-}
-.wa-tool-panel a:hover,
-.wa-tool-panel button:hover { background: rgba(0, 0, 0, 0.045); }
-.wa-tool-panel span { color: #8d8d92; font-size: 11px; }
-.wa-status-pill {
-  display: inline-flex;
-  height: 34px;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid rgba(0, 0, 0, 0.07);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.7);
-  padding: 0 13px;
-  color: #56565b;
-  font-size: 12px;
-  font-weight: 650;
-}
-button.wa-status-pill {
-  font-family: inherit;
-}
-button.wa-status-pill:not(:disabled) { cursor: pointer; }
-button.wa-status-pill:not(:disabled):hover { background: rgba(255, 255, 255, 0.92); }
-button.wa-status-pill:disabled { cursor: default; opacity: 0.72; }
-.wa-status-dot { width: 8px; height: 8px; border-radius: 50%; background: #0f7f56; }
-.wa-workspace {
-  display: grid;
-  grid-template-columns: clamp(310px, 24vw, 390px) minmax(520px, 1fr) clamp(300px, 22vw, 360px);
-  gap: 10px;
-  width: calc(100vw - 20px);
-  height: calc(100vh - 64px);
-  margin: 6px auto;
-}
-.wa-panel {
-  overflow: hidden;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.76);
-  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.08);
-  backdrop-filter: blur(28px) saturate(180%);
-}
-.wa-panel-header {
-  display: flex;
-  min-height: 58px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-  padding: 0 20px;
-}
-.wa-panel-title { min-width: 0; }
-.wa-panel-title strong {
-  display: block;
-  overflow: hidden;
-  color: #1d1d1f;
-  font-size: 15px;
-  font-weight: 700;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.wa-panel-title span { display: block; margin-top: 3px; color: #86868b; font-size: 12px; }
-.wa-chat {
-  display: flex;
-  min-height: 0;
-  flex-direction: column;
-  --bg: transparent;
-  --bg-2: rgba(255, 255, 255, 0.72);
-  --bg-3: rgba(0, 0, 0, 0.055);
-  --border: rgba(0, 0, 0, 0.07);
-  --border-2: rgba(0, 0, 0, 0.1);
-  --text: #1d1d1f;
-  --text-2: #5d5d62;
-  --text-3: #86868b;
-  --green: #0f7f56;
-  --red: #d94b3d;
-  --amber: #b85f00;
-  --blue: #0071e3;
-  --code-bg: rgba(0, 0, 0, 0.045);
-  --code-header: rgba(0, 0, 0, 0.045);
-  --code-text: #1d1d1f;
-  --code-dim: #6e6e73;
-  --content-width: 100%;
-  --content-px: 18px;
-}
-.wa-left-stack {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) minmax(170px, 0.58fr);
-  gap: 12px;
-  padding: 12px;
-}
-.wa-left-section {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-  border: 1px solid rgba(0, 0, 0, 0.085);
-  border-radius: 20px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(255, 255, 255, 0.76));
-  box-shadow:
-    0 16px 42px rgba(0, 0, 0, 0.075),
-    inset 0 1px 0 rgba(255, 255, 255, 0.96);
-}
-.wa-left-section::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 14px;
-  bottom: 14px;
-  width: 4px;
-  border-radius: 0 999px 999px 0;
-  background: #1d1d1f;
-  opacity: 0.9;
-}
-.wa-left-section:nth-child(2)::before { background: #0071e3; }
-.wa-left-section:nth-child(3)::before { background: #0f7f56; }
-.wa-left-section:nth-child(2) {
-  border-color: rgba(0, 113, 227, 0.16);
-  box-shadow:
-    0 18px 46px rgba(0, 113, 227, 0.11),
-    inset 0 1px 0 rgba(255, 255, 255, 0.96);
-}
-.wa-left-section:nth-child(3) {
-  border-color: rgba(15, 127, 86, 0.15);
-  box-shadow:
-    0 18px 46px rgba(15, 127, 86, 0.09),
-    inset 0 1px 0 rgba(255, 255, 255, 0.96);
-}
-.wa-left-section-header {
-  display: flex;
-  min-height: 48px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.07);
-  background: rgba(255, 255, 255, 0.62);
-  padding: 0 16px 0 18px;
-}
-.wa-left-section-header strong {
-  color: #1d1d1f;
-  font-size: 13.5px;
-  font-weight: 800;
-  letter-spacing: 0.01em;
-}
-.wa-left-section-header span {
-  display: block;
-  margin-top: 3px;
-  color: #86868b;
-  font-size: 11px;
-  font-weight: 700;
-}
-.wa-left-section-header button {
-  height: 28px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.72);
-  color: #55555a;
-  cursor: pointer;
-  padding: 0 10px;
-  font-size: 11px;
-  font-weight: 700;
-}
-.wa-left-input {
-  overflow: visible;
-}
-.wa-left-input-body {
-  padding: 12px;
-}
-.wa-left-pending {
-  color: #b85f00;
-  font-size: 13px;
-  font-weight: 650;
-  line-height: 1.45;
-  padding: 10px 12px;
-}
-.wa-agent-feed,
-.wa-run-feed {
-  min-height: 0;
-  flex: 1;
-  overflow-y: auto;
-  padding: 14px;
-}
-.wa-agent-card,
-.wa-run-card {
-  border: 1px solid rgba(0, 0, 0, 0.07);
-  border-radius: 15px;
-  background: rgba(255, 255, 255, 0.82);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.045);
-  padding: 13px;
-}
-.wa-agent-card + .wa-agent-card,
-.wa-run-card + .wa-run-card {
-  margin-top: 9px;
-}
-.wa-agent-prompt {
-  color: #55555a;
-  font-size: 12px;
-  font-weight: 650;
-  line-height: 1.45;
-}
-.wa-agent-answer {
-  margin-top: 9px;
-  color: #1d1d1f;
-  font-size: 13px;
-  line-height: 1.62;
-}
-.wa-agent-thinking {
-  margin-top: 9px;
-  border-top: 1px solid rgba(0, 0, 0, 0.055);
-  color: #6e6e73;
-  font-size: 12px;
-  line-height: 1.55;
-  padding-top: 9px;
-}
-.wa-ask-user {
-  margin-top: 10px;
-  display: grid;
-  gap: 8px;
-}
-.wa-ask-user button {
-  min-height: 32px;
-  border: 1px solid rgba(184, 95, 0, 0.22);
-  border-radius: 10px;
-  background: rgba(255, 247, 237, 0.82);
-  color: #7c3f00;
-  cursor: pointer;
-  padding: 7px 9px;
-  text-align: left;
-  font-size: 12px;
-  font-weight: 650;
-}
-.wa-run-card {
-  display: grid;
-  grid-template-columns: 22px minmax(0, 1fr);
-  gap: 8px;
-  align-items: start;
-  width: 100%;
-  text-align: left;
-}
-button.wa-run-card {
-  cursor: pointer;
-}
-button.wa-run-card.selected {
-  border-color: rgba(0, 113, 227, 0.28);
-  background: rgba(237, 246, 255, 0.92);
-  box-shadow: 0 12px 28px rgba(0, 113, 227, 0.12);
-}
-.wa-run-status-icon {
-  display: grid;
-  width: 20px;
-  height: 20px;
-  place-items: center;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.06);
-  color: #55555a;
-  font-size: 12px;
-  font-weight: 800;
-  line-height: 1;
-}
-.wa-run-status-icon.success,
-.wa-run-status-icon.completed,
-.wa-run-status-icon.done { background: rgba(15, 127, 86, 0.12); color: #0f7f56; }
-.wa-run-status-icon.failed,
-.wa-run-status-icon.error { background: rgba(217, 75, 61, 0.12); color: #d94b3d; }
-.wa-run-status-icon.running,
-.wa-run-status-icon.in_progress,
-.wa-run-status-icon.pending { background: rgba(184, 95, 0, 0.12); color: #b85f00; }
-.wa-run-main {
-  min-width: 0;
-}
-.wa-run-title {
-  overflow: hidden;
-  color: #1d1d1f;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.wa-run-detail {
-  margin-top: 3px;
-  overflow: hidden;
-  color: #6e6e73;
-  font-size: 11px;
-  font-weight: 650;
-  line-height: 1.45;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.wa-left-empty {
-  border: 1px dashed rgba(0, 0, 0, 0.11);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.54);
-  color: #737378;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.6;
-  padding: 16px;
-}
-.wa-log {
-  display: flex;
-  min-height: 0;
-  flex: 1;
-  overflow: hidden;
-}
-.wa-composer {
-  flex-shrink: 0;
-  overflow: visible;
-  border-top: 1px solid rgba(0, 0, 0, 0.05);
-  background: rgba(255, 255, 255, 0.52);
-  padding: 10px 12px 12px;
-  --content-width: 100%;
-  --content-px: 0px;
-}
-.wa-stage { display: flex; min-width: 0; min-height: 0; flex-direction: column; }
-.wa-stage-body {
-  position: relative;
-  min-height: 0;
-  flex: 1;
-  overflow: hidden;
-  background:
-    radial-gradient(circle at 50% 20%, rgba(140, 184, 255, 0.24), transparent 26%),
-    linear-gradient(180deg, #f8f8fb 0%, #eceff4 100%);
-}
-.wa-viewer {
-  width: 100%;
-  height: 100%;
-  border: 0;
-  background: transparent;
-}
-.wa-stage-empty {
-  display: grid;
-  min-height: 100%;
-  place-items: center;
-  padding: 24px;
-  text-align: center;
-}
-.wa-stage-empty-inner {
-  max-width: 340px;
-}
-.wa-stage-empty-inner strong {
-  display: block;
-  color: #1d1d1f;
-  font-size: 20px;
-  line-height: 1.2;
-}
-.wa-stage-empty-inner span {
-  display: block;
-  margin-top: 10px;
-  color: #6e6e73;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.55;
-}
-.wa-bom-stage {
-  width: 100%;
-  height: 100%;
-  overflow: auto;
-  padding: 72px 24px 24px;
-}
-.wa-bom-stage-inner {
-  max-width: 980px;
-  margin: 0 auto;
-}
-.wa-bom-stage h2 {
-  margin: 0;
-  font-size: 42px;
-  line-height: 1.05;
-}
-.wa-bom-stage p {
-  margin: 10px 0 0;
-  color: #6e6e73;
-  font-size: 15px;
-  line-height: 1.5;
-}
-.wa-bom-stage-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px;
-  margin-top: 24px;
-}
-.wa-bom-detail {
-  display: grid;
-  grid-template-columns: minmax(240px, 360px) minmax(0, 1fr);
-  gap: 16px;
-  margin-top: 24px;
-}
-.wa-bom-detail-card {
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  border-radius: 22px;
-  background: rgba(255, 255, 255, 0.72);
-  padding: 18px;
-}
-.wa-bom-detail-card img {
-  display: block;
-  max-width: 100%;
-  max-height: 220px;
-  margin: 0 auto;
-  object-fit: contain;
-}
-.wa-bom-detail-card h3 {
-  margin: 0;
-  font-size: 22px;
-  line-height: 1.2;
-}
-.wa-bom-detail-fields {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 10px;
-  margin-top: 16px;
-}
-.wa-bom-field {
-  border-radius: 14px;
-  background: rgba(0, 0, 0, 0.035);
-  padding: 11px 12px;
-}
-.wa-bom-field span {
-  display: block;
-  color: #86868b;
-  font-size: 11px;
-  font-weight: 650;
-}
-.wa-bom-field strong {
-  display: block;
-  margin-top: 4px;
-  color: #1d1d1f;
-  font-size: 13px;
-  line-height: 1.35;
-}
-.wa-bom-stage-grid button {
-  min-height: 96px;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.72);
-  padding: 15px;
-  text-align: left;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.05);
-}
-.wa-bom-stage-grid button.selected {
-  border-color: rgba(0, 113, 227, 0.32);
-  box-shadow: 0 18px 44px rgba(0, 113, 227, 0.12);
-}
-.wa-bom-stage-grid strong {
-  display: block;
-  margin-top: 8px;
-  color: #1d1d1f;
-  font-size: 14px;
-}
-.wa-bom-stage-grid small {
-  display: block;
-  margin-top: 5px;
-  color: #86868b;
-  font-size: 12px;
-}
-.wa-log-stage {
-  width: 100%;
-  height: 100%;
-  overflow: auto;
-  padding: 72px 24px 24px;
-}
-.wa-log-stage-inner {
-  max-width: 940px;
-  margin: 0 auto;
-}
-.wa-log-stage h2 {
-  margin: 0;
-  font-size: 42px;
-  line-height: 1.05;
-}
-.wa-log-stage p {
-  margin: 10px 0 0;
-  color: #6e6e73;
-  font-size: 15px;
-  line-height: 1.5;
-}
-.wa-log-detail-card {
-  margin-top: 24px;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  border-radius: 22px;
-  background: rgba(255, 255, 255, 0.72);
-  padding: 18px;
-}
-.wa-log-detail-card h3 {
-  margin: 0;
-  color: #1d1d1f;
-  font-size: 24px;
-  line-height: 1.2;
-}
-.wa-log-detail-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 10px;
-  margin-top: 16px;
-}
-.wa-log-detail-field {
-  border-radius: 14px;
-  background: rgba(0, 0, 0, 0.035);
-  padding: 11px 12px;
-}
-.wa-log-detail-field span {
-  display: block;
-  color: #86868b;
-  font-size: 11px;
-  font-weight: 650;
-}
-.wa-log-detail-field strong {
-  display: block;
-  margin-top: 4px;
-  overflow-wrap: anywhere;
-  color: #1d1d1f;
-  font-size: 13px;
-  line-height: 1.35;
-}
-.wa-log-raw {
-  max-height: 320px;
-  overflow: auto;
-  margin: 16px 0 0;
-  border-radius: 14px;
-  background: rgba(0, 0, 0, 0.055);
-  padding: 14px;
-  color: #1d1d1f;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-size: 12px;
-  line-height: 1.55;
-  white-space: pre-wrap;
-}
-.wa-stage-toolbar {
-  position: absolute;
-  right: 18px;
-  top: 18px;
-  z-index: 2;
-}
-.wa-stage-footer {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1px;
-  border-top: 1px solid rgba(0, 0, 0, 0.05);
-  background: rgba(0, 0, 0, 0.06);
-}
-.wa-stage-footer div { min-height: 82px; background: rgba(255, 255, 255, 0.68); padding: 16px 18px; }
-.wa-stage-footer strong { display: block; font-size: 22px; line-height: 1; }
-.wa-stage-footer span { display: block; margin-top: 8px; color: #6e6e73; font-size: 12px; font-weight: 600; }
-.wa-inspector { display: flex; min-height: 0; flex-direction: column; }
-.wa-inspector-content { min-height: 0; overflow-y: auto; padding: 16px; }
-.wa-info-card {
-  margin-bottom: 14px;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  border-radius: 22px;
-  background: rgba(255, 255, 255, 0.66);
-  padding: 16px;
-}
-.wa-info-card h3 { margin: 0; font-size: 16px; line-height: 1.2; }
-.wa-info-card p { margin: 9px 0 0; color: #6e6e73; font-size: 13px; line-height: 1.5; }
-.wa-progress { display: grid; gap: 10px; margin-top: 14px; }
-.wa-progress-item {
-  display: grid;
-  grid-template-columns: 76px 1fr auto;
-  align-items: center;
-  gap: 10px;
-  color: #5d5d62;
-  font-size: 12px;
-  font-weight: 650;
-}
-.wa-progress-files {
-  grid-column: 2 / 4;
-  margin-top: -4px;
-  overflow: hidden;
-  color: #8d8d92;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.wa-bar { height: 8px; overflow: hidden; border-radius: 999px; background: rgba(0, 0, 0, 0.06); }
-.wa-bar span { display: block; height: 100%; border-radius: inherit; background: #1d1d1f; }
-.wa-files, .wa-bom-list { display: grid; gap: 9px; margin-top: 14px; }
-.wa-file, .wa-bom-row {
-  display: block;
-  gap: 8px;
-  align-items: center;
-  min-height: 44px;
-  border-radius: 10px;
-  background: rgba(0, 0, 0, 0.035);
-  padding: 7px 8px;
-  color: #55555a;
-  font-size: 12px;
-  font-weight: 650;
-  text-align: left;
-}
-.wa-bom-row.selected {
-  border: 1px solid rgba(0, 113, 227, 0.32);
-  background: rgba(0, 113, 227, 0.08);
-  box-shadow: 0 10px 26px rgba(0, 113, 227, 0.1);
-}
-.wa-file small, .wa-bom-row small { color: #8d8d92; font-size: 11px; }
-.wa-bom-row-top {
-  display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) auto;
-  gap: 6px;
-  align-items: center;
-}
-.wa-bom-row strong {
-  display: block;
-  overflow: hidden;
-  color: #1d1d1f;
-  font-size: 12px;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.wa-bom-id { color: #55555a; font: 700 11px/1 "SF Mono", Consolas, monospace; }
-@media (max-width: 1100px) {
-  .workspace-apple { overflow: auto; }
-  .wa-tabs { display: none; }
-  .wa-workspace {
-    grid-template-columns: 1fr;
-    width: min(100vw - 20px, 760px);
-    height: auto;
-    padding-bottom: 20px;
-  }
-  .wa-panel { min-height: 420px; }
-  .wa-stage-body { min-height: 520px; }
-  .wa-bom-detail { grid-template-columns: 1fr; }
-}
-`
-
-function getFileNames(turns: ReturnType<typeof useWorkspaceAppState>["turns"], currentEvents: ReturnType<typeof useWorkspaceAppState>["currentEvents"]) {
-  const names = new Set<string>()
-  const allEvents = [...turns.flatMap(turn => turn.events), ...currentEvents]
-  for (const event of allEvents) {
-    if (event.type !== "item.completed" || event.item.type !== "file_change") continue
-    for (const change of event.item.changes) names.add(change.path)
-  }
-  return [...names].slice(0, 5)
-}
 
 function formatBomValue(value: unknown) {
   if (value === null || value === undefined || value === "") return "-"
   if (Array.isArray(value)) return value.length > 0 ? value.join(" x ") : "-"
   return String(value)
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-}
-
-function progressLabel(key: string, t: ReturnType<typeof useTranslation>["t"]) {
-  const normalized = key.toLowerCase().replace(/[\s_-]+/gu, "")
-  const labels: Record<string, string> = {
-    layoutcompletionpercent: t("workspace.progress.layoutComplete"),
-    layout: t("workspace.progress.layout"),
-    layoutpercent: t("workspace.progress.layout"),
-    topology: t("workspace.progress.topology"),
-    bom: "BOM",
-    geometry: t("workspace.progress.geometry"),
-    modeling: t("workspace.progress.modeling"),
-    modelingpercent: t("workspace.progress.modeling"),
-    model: t("workspace.progress.modeling"),
-    build: t("workspace.progress.modeling"),
-    assembly: t("workspace.progress.assembly"),
-    replacement: t("workspace.progress.replacement"),
-    export: t("workspace.progress.export"),
-    exportfilepercent: t("workspace.progress.exportFile"),
-    exportpercent: t("workspace.progress.export"),
-    glb: "GLB",
-    step: "STEP",
-    preview: t("workspace.progress.preview"),
-    simulation: t("workspace.progress.simulationRun"),
-    analysis: t("workspace.progress.analysis"),
-  }
-  return labels[normalized] ?? key
-}
-
-function normalizeProgressKey(key: string) {
-  const normalized = key.toLowerCase().replace(/[\s_-]+/gu, "")
-  const aliases: Record<string, string> = {
-    layoutcompletionpercent: "layout",
-    layoutpercent: "layout",
-    layoutgenerate: "layout",
-    layoutgeneratebom: "layout",
-    modeling: "modeling",
-    modelingpercent: "modeling",
-    model: "modeling",
-    geometry: "modeling",
-    geometryedit: "modeling",
-    geometryvalidate: "modeling",
-    export: "export_file_percent",
-    exportfilepercent: "export_file_percent",
-    exportpercent: "export_file_percent",
-    casebuild: "case_build",
-    simulation: "simulation_run",
-    simulationrun: "simulation_run",
-    fieldexport: "field_export",
-    analysis: "analysis",
-    suggestion: "suggestion",
-  }
-  return aliases[normalized] ?? key
-}
-
-function getWorkflowProgressEntries(progressEntries: ProgressEntry[], t: ReturnType<typeof useTranslation>["t"]) {
-  const progressByKey = new Map(progressEntries.map(entry => [normalizeProgressKey(entry.key), entry]))
-  return WORKFLOW_PROGRESS_STAGES.map(stage => {
-    const progress = progressByKey.get(stage.key)
-    const label = t(stage.label)
-    return progress ? { ...stage, fileNames: progress.fileNames, label, percent: progress.percent } : { ...stage, label }
-  })
-}
-
-function getDisplayFileName(pathValue: string) {
-  const normalized = pathValue.replace(/\\/gu, "/")
-  return normalized.split("/").pop() || pathValue
-}
-
-function isGlbFilePath(pathValue: string) {
-  return /\.glb$/iu.test(pathValue.trim())
-}
-
-function getViewerGlbPath(filePaths: string[]) {
-  return filePaths.find(isGlbFilePath) ?? null
-}
-
-function normalizePercent(value: unknown) {
-  if (typeof value !== "number" || !Number.isFinite(value)) return null
-  const percent = value <= 1 && value >= 0 ? value * 100 : value
-  return Math.max(0, Math.min(100, Math.round(percent)))
-}
-
-function getProgressEntries(data: unknown, t: ReturnType<typeof useTranslation>["t"]): ProgressEntry[] {
-  const progressData = isRecord(data) && isRecord(data.progress_percentages)
-    ? data.progress_percentages
-    : isRecord(data) && isRecord(data.progress)
-      ? data.progress
-      : data
-  const entries: ProgressEntry[] = []
-  const outputFilesByKey = getProgressOutputFilesByKey(data)
-
-  if (Array.isArray(progressData)) {
-    progressData.forEach((item, index) => {
-      if (!isRecord(item)) return
-      const key = typeof item.key === "string"
-        ? item.key
-        : typeof item.name === "string"
-          ? item.name
-          : typeof item.label === "string"
-            ? item.label
-            : `step_${index + 1}`
-      const value = item.percent ?? item.percentage ?? item.progress ?? item.value
-      const percent = normalizePercent(value)
-      if (percent === null) return
-      entries.push({
-        fileNames: outputFilesByKey.get(key) ?? [],
-        key,
-        label: typeof item.label === "string" ? item.label : progressLabel(key, t),
-        percent,
-      })
-    })
-    return entries
-  }
-
-  if (!isRecord(progressData)) return entries
-  for (const [key, value] of Object.entries(progressData)) {
-    if (["files", "key_files", "artifacts", "outputs", "output_files", "progress", "progress_percentages", "updated_at", "tool", "success"].includes(key)) continue
-    const percent = normalizePercent(value)
-    if (percent === null) continue
-    entries.push({
-      fileNames: outputFilesByKey.get(key) ?? [],
-      key,
-      label: progressLabel(key, t),
-      percent,
-    })
-  }
-  return entries
-}
-
-function getProgressOutputFilesByKey(data: unknown) {
-  const files = new Map<string, string[]>()
-  if (!isRecord(data) || !isRecord(data.output_files)) return files
-  const showFinalOutputs = data.success === true
-
-  for (const [key, value] of Object.entries(data.output_files)) {
-    if (!showFinalOutputs && ["step", "glb", "replaced_step", "replaced_glb"].includes(key)) continue
-    const names: string[] = []
-    if (typeof value === "string") {
-      names.push(getDisplayFileName(value))
-    } else if (isRecord(value)) {
-      if (value.exists !== true) continue
-      const pathValue = value.path ?? value.file ?? value.name
-      if (typeof pathValue === "string") names.push(getDisplayFileName(pathValue))
-    }
-
-    if (names.length === 0) continue
-    files.set(key, names)
-    if (key === "step" || key === "glb") {
-      const exportNames = files.get("export_file_percent") ?? []
-      files.set("export_file_percent", [...exportNames, ...names])
-    }
-  }
-
-  return files
-}
-
-function getProgressFiles(data: unknown) {
-  if (!isRecord(data)) return []
-  const candidates = [data.files, data.key_files, data.artifacts, data.outputs, data.output_files]
-  const paths = new Set<string>()
-  const showFinalOutputs = data.success === true
-
-  for (const candidate of candidates) {
-    if (Array.isArray(candidate)) {
-      for (const item of candidate) {
-        if (typeof item === "string") paths.add(item)
-        if (isRecord(item)) {
-          if (item.exists === false) continue
-          const pathValue = item.path ?? item.file ?? item.name
-          if (typeof pathValue === "string") paths.add(pathValue)
-        }
-      }
-    } else if (isRecord(candidate)) {
-      for (const [key, value] of Object.entries(candidate)) {
-        if (!showFinalOutputs && ["step", "glb", "replaced_step", "replaced_glb"].includes(key)) continue
-        if (typeof value === "string") paths.add(value)
-        if (isRecord(value)) {
-          if (value.exists !== true) continue
-          const pathValue = value.path ?? value.file ?? value.name
-          if (typeof pathValue === "string") paths.add(pathValue)
-        }
-      }
-    }
-  }
-
-  return [...paths].slice(0, 6)
-}
-
-function formatProgressUpdatedAt(progressData: FreecadProgressResponse | null, language: string, t: ReturnType<typeof useTranslation>["t"]) {
-  const rawUpdatedAt = progressData?.updated_at ??
-    (isRecord(progressData?.data) && typeof progressData.data.updated_at === "string"
-      ? progressData.data.updated_at
-      : null)
-  if (!rawUpdatedAt) return t("workspace.inspector.waitingUpdate")
-
-  const parsed = new Date(rawUpdatedAt)
-  if (Number.isNaN(parsed.getTime())) return rawUpdatedAt
-  return parsed.toLocaleString(language.startsWith("en") ? "en-US" : "zh-CN")
-}
-
-type AgentSummary = {
-  answer: string
-  id: string
-  prompt: string
-  reasoning: string
-}
-
-type RunLogEntry = {
-  detail: string
-  fields?: Record<string, string>
-  id: string
-  raw?: unknown
-  source?: string
-  status: string
-  title: string
-  type: string
-  time?: string
-}
-
-type StageLogEntry = {
-  detail?: string
-  fields?: Record<string, string>
-  id: string
-  raw?: unknown
-  source?: string
-  status: string
-  stage_name: string
-  time: string
-}
-
-function getLatestItemText(events: ThreadEvent[], itemType: "agent_message" | "reasoning") {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index]
-    if (
-      (event.type === "item.completed" || event.type === "item.updated" || event.type === "item.started") &&
-      event.item.type === itemType &&
-      event.item.text.trim()
-    ) {
-      return event.item.text.trim()
-    }
-  }
-  return ""
-}
-
-function buildAgentSummaries(turns: Turn[], currentPrompt: string, currentEvents: ThreadEvent[]): AgentSummary[] {
-  const summaries = turns.map(turn => ({
-    answer: getLatestItemText(turn.events, "agent_message"),
-    id: turn.id,
-    prompt: turn.userPrompt,
-    reasoning: getLatestItemText(turn.events, "reasoning"),
-  }))
-
-  if (currentPrompt || currentEvents.length > 0) {
-    summaries.push({
-      answer: getLatestItemText(currentEvents, "agent_message"),
-      id: "current",
-      prompt: currentPrompt,
-      reasoning: getLatestItemText(currentEvents, "reasoning"),
-    })
-  }
-
-  return summaries.filter(summary => summary.prompt || summary.answer || summary.reasoning)
-}
-
-function getRunLogEntries(turns: Turn[], currentEvents: ThreadEvent[], t: ReturnType<typeof useTranslation>["t"]): RunLogEntry[] {
-  const events = [...turns.flatMap(turn => turn.events), ...currentEvents]
-  const entries: RunLogEntry[] = []
-
-  events.forEach((event, index) => {
-    if (event.type === "turn.started") {
-      entries.push({ detail: "turn started", id: `turn-started-${index}`, status: "running", title: t("workspace.logs.turnStarted"), type: "run" })
-      return
-    }
-    if (event.type === "turn.completed") {
-      entries.push({
-        detail: `input ${event.usage.input_tokens} / output ${event.usage.output_tokens}`,
-        id: `turn-completed-${index}`,
-        status: "completed",
-        title: t("workspace.logs.turnCompleted"),
-        type: "run",
-      })
-      return
-    }
-    if (event.type === "turn.failed") {
-      entries.push({ detail: event.error.message, id: `turn-failed-${index}`, status: "failed", title: t("workspace.logs.turnFailed"), type: "error" })
-      return
-    }
-    if (event.type === "error") {
-      entries.push({ detail: event.message, id: `error-${index}`, status: "error", title: t("workspace.logs.systemError"), type: "error" })
-      return
-    }
-    if (event.type !== "item.started" && event.type !== "item.updated" && event.type !== "item.completed") return
-
-    const done = event.type === "item.completed"
-    const item = event.item
-    if (item.type === "command_execution") {
-      const command = item.command.split("\n")[0] ?? item.command
-      entries.push({
-        detail: done ? `exit ${item.exit_code ?? "-"}` : item.status,
-        fields: {
-          command: item.command,
-          exit_code: item.exit_code == null ? "-" : String(item.exit_code),
-          output_chars: String(item.aggregated_output.length),
-        },
-        id: `${item.id}-${event.type}`,
-        raw: {
-          command: item.command,
-          output: item.aggregated_output,
-          status: item.status,
-          exit_code: item.exit_code ?? null,
-        },
-        status: item.status,
-        title: command,
-        type: "shell",
-      })
-      return
-    }
-    if (item.type === "file_change") {
-      entries.push({
-        detail: item.changes.map(change => `${change.kind} ${change.path}`).join(", "),
-        fields: {
-          changes: String(item.changes.length),
-          paths: item.changes.map(change => change.path).join(", "),
-        },
-        id: `${item.id}-${event.type}`,
-        raw: item.changes,
-        status: done ? "completed" : "running",
-        title: t("workspace.logs.fileChange", { count: item.changes.length }),
-        type: "file",
-      })
-      return
-    }
-    if (item.type === "mcp_tool_call") {
-      entries.push({
-        detail: `${item.server}.${item.tool} · ${item.status}`,
-        fields: {
-          server: item.server,
-          tool: item.tool,
-        },
-        id: `${item.id}-${event.type}`,
-        raw: {
-          arguments: item.arguments,
-          result: item.result ?? null,
-          error: item.error ?? null,
-        },
-        status: item.status,
-        title: t("workspace.logs.toolCall"),
-        type: "tool",
-      })
-      return
-    }
-    if (item.type === "web_search") {
-      entries.push({ detail: item.query, id: `${item.id}-${event.type}`, status: done ? "completed" : "running", title: t("workspace.logs.webSearch"), type: "web" })
-      return
-    }
-    if (item.type === "ask_user") {
-      entries.push({ detail: item.question, id: `${item.id}-${event.type}`, status: "pending", title: t("workspace.logs.askUser"), type: "ask" })
-    }
-  })
-
-  return entries.slice(-80).reverse()
-}
-
-function getDisplayLogEntries(stageLogs: StageLogEntry[], runEntries: RunLogEntry[]): RunLogEntry[] {
-  if (stageLogs.length > 0) {
-    return stageLogs.map(entry => ({
-      detail: entry.detail ?? formatStageLogTime(entry.time),
-      fields: entry.fields,
-      id: entry.id,
-      raw: entry.raw,
-      source: entry.source,
-      status: entry.status,
-      time: entry.time,
-      title: entry.stage_name,
-      type: "stage",
-    }))
-  }
-  return runEntries
-}
-
-function AgentUnderstandingPanel({
-  currentEvents,
-  currentPrompt,
-  onSubmitAskUser,
-  onStopAskUser,
-  pendingAskUser,
-  turns,
-}: {
-  currentEvents: ThreadEvent[]
-  currentPrompt: string
-  onSubmitAskUser: (answer: string) => void
-  onStopAskUser: () => void
-  pendingAskUser: ReturnType<typeof useWorkspaceAppState>["pendingAskUser"]
-  turns: Turn[]
-}) {
-  const { t } = useTranslation()
-  const summaries = useMemo(() => buildAgentSummaries(turns, currentPrompt, currentEvents), [currentEvents, currentPrompt, turns])
-  const visibleSummaries = summaries.slice(-1)
-
-  return (
-    <section className="wa-left-section">
-      <div className="wa-left-section-header">
-        <div>
-          <strong>{t("workspace.agent.title")}</strong>
-          <span>{summaries.length > 0 ? t("workspace.agent.turns", { count: summaries.length }) : t("workspace.agent.waiting")}</span>
-        </div>
-      </div>
-      <div className="wa-agent-feed">
-        {visibleSummaries.length === 0 ? (
-          <div className="wa-left-empty">{t("workspace.agent.empty")}</div>
-        ) : visibleSummaries.map(summary => (
-          <article className="wa-agent-card" key={summary.id}>
-            {summary.prompt && <div className="wa-agent-prompt">{t("workspace.agent.userPrompt", { prompt: summary.prompt })}</div>}
-            {summary.answer ? (
-              <div className="wa-agent-answer"><MarkdownText text={summary.answer} /></div>
-            ) : (
-              <div className="wa-agent-answer">{t("workspace.agent.generating")}</div>
-            )}
-            {summary.reasoning && (
-              <details className="wa-agent-thinking">
-                <summary>{t("workspace.agent.reasoning")}</summary>
-                <MarkdownText text={summary.reasoning} tone="muted" />
-              </details>
-            )}
-          </article>
-        ))}
-        {pendingAskUser && (
-          <article className="wa-agent-card">
-            <div className="wa-agent-prompt">{t("workspace.agent.needsConfirmation", { question: pendingAskUser.question })}</div>
-            <div className="wa-ask-user">
-              {pendingAskUser.options.map(option => (
-                <button type="button" key={option} onClick={() => onSubmitAskUser(option)}>{option}</button>
-              ))}
-              <button type="button" onClick={onStopAskUser}>{t("workspace.agent.stop")}</button>
-            </div>
-          </article>
-        )}
-      </div>
-    </section>
-  )
-}
-
-function getStatusIcon(status: string) {
-  const normalized = status.toLowerCase()
-  if (["success", "completed", "complete", "done", "passed", "ok"].includes(normalized)) return "✓"
-  if (["failed", "failure", "error", "cancelled", "canceled"].includes(normalized)) return "!"
-  if (["running", "in_progress", "pending", "started", "processing"].includes(normalized)) return "…"
-  return "•"
-}
-
-function formatStageLogTime(time: string) {
-  if (!time) return "-"
-  const parsed = new Date(time)
-  if (Number.isNaN(parsed.getTime())) return time
-  return parsed.toLocaleString()
-}
-
-function RunLogPanel({
-  entries,
-  onSelect,
-  selectedLogId,
-}: {
-  entries: RunLogEntry[]
-  onSelect: (entry: RunLogEntry) => void
-  selectedLogId: string
-}) {
-  const { t } = useTranslation()
-  return (
-    <section className="wa-left-section">
-      <div className="wa-left-section-header">
-        <div>
-          <strong>{t("workspace.logs.title")}</strong>
-          <span>{entries.length > 0 ? t("workspace.logs.count", { count: entries.length }) : t("workspace.logs.noRuns")}</span>
-        </div>
-      </div>
-      <div className="wa-run-feed">
-        {entries.length === 0 ? (
-          <div className="wa-left-empty">{t("workspace.logs.empty")}</div>
-        ) : (
-          entries.map(entry => (
-            <button
-              type="button"
-              className={`wa-run-card${entry.id === selectedLogId ? " selected" : ""}`}
-              key={entry.id}
-              onClick={() => onSelect(entry)}
-            >
-              <span className={`wa-run-status-icon ${entry.status.toLowerCase()}`} title={entry.status}>
-                {getStatusIcon(entry.status)}
-              </span>
-              <div className="wa-run-main">
-                <div className="wa-run-title" title={entry.title}>{entry.title}</div>
-                <div className="wa-run-detail" title={entry.detail}>{entry.detail}</div>
-              </div>
-            </button>
-          ))
-        )}
-      </div>
-    </section>
-  )
 }
 
 interface WorkspaceSessionPageProps {
@@ -1532,7 +78,7 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
     activeSessionId,
     currentEvents,
     currentPrompt,
-    handleDelete: _handleDelete,
+    handleDelete,
     handleAssignSessionWorkspace,
     handleNew,
     handleSelect,
@@ -1557,6 +103,10 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
   const [workspaceOpen, setWorkspaceOpen] = useState(false)
   const [workspaceChanging, setWorkspaceChanging] = useState(false)
   const [hoveredWorkspaceName, setHoveredWorkspaceName] = useState<string | null>(null)
+  const [lastGlbPathsBySession, setLastGlbPathsBySession] = useState<Record<string, string>>({})
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null)
+  const [deleteError, setDeleteError] = useState("")
+  const [deletePending, setDeletePending] = useState(false)
 
   const activeSession = sortedSessions.find(session => session.id === activeSessionId)
   const workspaceItems = workspaces?.items ?? []
@@ -1601,7 +151,10 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
   const logEntries = useMemo(() => getDisplayLogEntries(stageLogs, runLogEntries), [runLogEntries, stageLogs])
   const selectedLog = logEntries.find(entry => entry.id === selectedLogId) ?? logEntries[0] ?? null
   const displayedFileNames = progressFiles.length > 0 ? progressFiles : fileNames
-  const previewGlbPath = useMemo(() => getViewerGlbPath(displayedFileNames), [displayedFileNames])
+  const latestProgressGlbPath = useMemo(() => getViewerGlbPath(displayedFileNames), [displayedFileNames])
+  const latestSessionGlbPath = useMemo(() => getLatestSessionGlbPath(turns, currentEvents), [turns, currentEvents])
+  const latestGlbPath = latestSessionGlbPath ?? latestProgressGlbPath
+  const previewGlbPath = activeSessionId ? latestGlbPath ?? lastGlbPathsBySession[activeSessionId] ?? null : latestGlbPath
   const viewerHref = useMemo(() => {
     const params = new URLSearchParams()
     if (activeSessionId) params.set("sessionId", activeSessionId)
@@ -1730,6 +283,15 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
   }, [])
 
   useEffect(() => {
+    if (!activeSessionId || !latestGlbPath) return
+    setLastGlbPathsBySession(prev => (
+      prev[activeSessionId] === latestGlbPath
+        ? prev
+        : { ...prev, [activeSessionId]: latestGlbPath }
+    ))
+  }, [activeSessionId, latestGlbPath])
+
+  useEffect(() => {
     setProgressData(null)
   }, [activeSessionId])
 
@@ -1824,7 +386,6 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
 
   return (
     <div className="workspace-apple">
-      <style>{STYLE}</style>
       <header className="wa-topbar">
         <div className="wa-topbar-inner">
           <div className="wa-nav-left">
@@ -1874,15 +435,44 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
                     </div>
                     {hoveredWorkspace && hoveredWorkspaceSessions.length > 0 ? (
                       hoveredWorkspaceSessions.slice(0, 12).map(session => (
-                        <button
-                          type="button"
+                        <div
                           className={`wa-workspace-session${session.id === activeSessionId ? " active" : ""}`}
                           key={session.id}
                           onClick={() => handleSelectWorkspaceHistory(session, hoveredWorkspace)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(event) => {
+                            if (event.key !== "Enter" && event.key !== " ") return
+                            event.preventDefault()
+                            handleSelectWorkspaceHistory(session, hoveredWorkspace)
+                          }}
                         >
-                          <strong>{session.turns[0]?.userPrompt || session.title || t("common.unnamedSession")}</strong>
-                          <span>{formatSessionTime(session.createdAt)}</span>
-                        </button>
+                          <span className="wa-workspace-session-main">
+                            <strong>{session.turns[0]?.userPrompt || session.title || t("common.unnamedSession")}</strong>
+                            <span>{formatSessionTime(session.createdAt)}</span>
+                          </span>
+                          <button
+                            type="button"
+                            className="wa-workspace-session-delete"
+                            aria-label={t("home.deleteConversation")}
+                            title={t("home.deleteConversation")}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              const title = session.turns[0]?.userPrompt || session.title || t("common.unnamedSession")
+                              setDeleteError("")
+                              setDeleteTarget({ id: session.id, title })
+                            }}
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M9 5h6" />
+                              <path d="M10 5l1-2h2l1 2" />
+                              <path d="M5 7h14" />
+                              <path d="M7 7l1 14h8l1-14" />
+                              <path d="M10 11v6" />
+                              <path d="M14 11v6" />
+                            </svg>
+                          </button>
+                        </div>
                       ))
                     ) : (
                       <div className="wa-left-empty">{t("workspace.noHistory")}</div>
@@ -1944,6 +534,58 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
           </div>
         </div>
       </header>
+
+      {deleteTarget && (
+        <div className="wa-delete-dialog-backdrop" role="presentation" onClick={() => !deletePending && setDeleteTarget(null)}>
+          <section
+            aria-labelledby="wa-delete-dialog-title"
+            aria-modal="true"
+            className="wa-delete-dialog"
+            role="dialog"
+            onClick={event => event.stopPropagation()}
+          >
+            <div className="wa-delete-dialog-body">
+              <div className="wa-delete-dialog-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 5h6" />
+                  <path d="M10 5l1-2h2l1 2" />
+                  <path d="M5 7h14" />
+                  <path d="M7 7l1 14h8l1-14" />
+                  <path d="M10 11v6" />
+                  <path d="M14 11v6" />
+                </svg>
+              </div>
+              <h3 id="wa-delete-dialog-title">{t("home.deleteDialogTitle")}</h3>
+              <p>{t("home.deleteDialogDescription", { title: deleteTarget.title })}</p>
+              {deleteError && <span className="wa-delete-dialog-error">{deleteError}</span>}
+            </div>
+            <div className="wa-delete-dialog-actions">
+              <button type="button" className="wa-delete-dialog-cancel" disabled={deletePending} onClick={() => setDeleteTarget(null)}>
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                className="wa-delete-dialog-danger"
+                disabled={deletePending}
+                onClick={async () => {
+                  setDeletePending(true)
+                  setDeleteError("")
+                  try {
+                    await handleDelete(deleteTarget.id)
+                    setDeleteTarget(null)
+                  } catch {
+                    setDeleteError(t("home.deleteFailed"))
+                  } finally {
+                    setDeletePending(false)
+                  }
+                }}
+              >
+                {deletePending ? t("common.deleting") : t("common.delete")}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
 
       <main className="wa-workspace">
         <aside className="wa-panel wa-chat wa-left-stack">

@@ -30,7 +30,10 @@ const fastify = Fastify({
   },
 })
 
-await fastify.register(cors, { origin: config.server.corsOrigin })
+await fastify.register(cors, {
+  origin: config.server.corsOrigin,
+  methods: ["GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS"],
+})
 await fastify.register(taskRoutes, { config, logger })
 await fastify.register(sessionRoutes, { logger })
 await fastify.register(imageRoutes)

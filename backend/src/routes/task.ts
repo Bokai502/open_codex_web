@@ -10,6 +10,11 @@ import type { Logger } from "../logger.js"
 import { initializeFreecadProgressForSession } from "../freecadProgress.js"
 import { resolveFreecadWorkspaceDir } from "../freecadWorkspace.js"
 
+type CodexConfigValue = string | number | boolean | CodexConfigValue[] | CodexConfigObject
+type CodexConfigObject = {
+  [key: string]: CodexConfigValue
+}
+
 const ASK_USER_PROTOCOL = [
   "You can ask the user for one missing piece of information through the application's ask-user-question capability.",
   "Use it only when a required detail is missing and you cannot proceed safely or accurately without it.",
@@ -73,10 +78,34 @@ const UPLOADABLE_IMAGE_MIME_TYPES = new Map([
   ["image/gif", ".gif"],
 ])
 const SESSIONS_FILE = path.resolve(process.cwd(), "sessions.json")
+const DELETED_SESSIONS_FILE = path.resolve(process.cwd(), "deleted-sessions.json")
 
 function sanitizeUploadName(name: string) {
   const base = path.basename(name).replace(/[^a-zA-Z0-9._-]/g, "_")
   return base || "image"
+}
+
+function buildCodexConfig(config: AppConfig): CodexConfigObject {
+  const codexConfig: CodexConfigObject = {
+    show_raw_agent_reasoning: true,
+  }
+
+  const providerId = config.openai.modelProvider
+  if (providerId) {
+    codexConfig.model_provider = providerId
+    codexConfig.model_providers = {
+      [providerId]: {
+        name: config.openai.modelProviderName ?? providerId,
+        base_url: config.openai.baseUrl,
+        ...(config.openai.wireApi ? { wire_api: config.openai.wireApi } : {}),
+        ...(config.openai.supportsWebsockets == null
+          ? {}
+          : { supports_websockets: config.openai.supportsWebsockets }),
+      },
+    }
+  }
+
+  return codexConfig
 }
 
 function elapsedMs(startedAt: bigint) {
@@ -231,6 +260,18 @@ async function writeSessionsFile(sessions: SessionRecord[]) {
   await atomicWrite(SESSIONS_FILE, JSON.stringify(sessions, null, 2))
 }
 
+async function readDeletedSessionIds() {
+  try {
+    const raw = await fs.readFile(DELETED_SESSIONS_FILE, "utf-8")
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed)
+      ? new Set(parsed.filter((id): id is string => typeof id === "string" && id.trim() !== ""))
+      : new Set<string>()
+  } catch {
+    return new Set<string>()
+  }
+}
+
 async function ensureRunSession({
   prompt,
   sessionId,
@@ -242,6 +283,8 @@ async function ensureRunSession({
   threadId: string | null
   workspaceDir: string | null
 }) {
+  if ((await readDeletedSessionIds()).has(sessionId)) return
+
   const sessions = await readSessionsFile()
   const index = sessions.findIndex(session => session.id === sessionId)
   const workspaceName = getWorkspaceName(workspaceDir)
@@ -285,6 +328,8 @@ async function completeRunSessionTurn({
   turnId: string
   workspaceDir: string | null
 }) {
+  if ((await readDeletedSessionIds()).has(sessionId)) return
+
   const sessions = await readSessionsFile()
   const index = sessions.findIndex(session => session.id === sessionId)
   const workspaceName = getWorkspaceName(workspaceDir)
@@ -446,6 +491,9 @@ export async function taskRoutes(
         turnId: trimmedTurnId,
         baseUrl: config.openai.baseUrl,
         model: config.openai.model,
+        modelProvider: config.openai.modelProvider,
+        wireApi: config.openai.wireApi,
+        supportsWebsockets: config.openai.supportsWebsockets,
         modelReasoningEffort: config.codex.modelReasoningEffort,
         workingDirectory: config.codex.workingDirectory,
         freecadWorkspaceDir: runContext.freecadWorkspaceDir,
@@ -480,12 +528,11 @@ export async function taskRoutes(
       req.raw.socket?.on("close", () => abort.abort())
 
       try {
+        const codexConfig = buildCodexConfig(config)
         const codex = new Codex({
           apiKey: config.openai.apiKey,
           baseUrl: config.openai.baseUrl,
-          config: {
-            show_raw_agent_reasoning: true,
-          },
+          config: codexConfig,
         })
 
         const threadOptions = {
