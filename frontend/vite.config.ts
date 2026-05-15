@@ -31,7 +31,10 @@ function loadRootConfig(): RootConfig {
 export default defineConfig(({ mode }) => {
   const useHttps = mode === "https-dev"
   const rootConfig = loadRootConfig()
-  const backendPort = rootConfig.server?.port ?? DEFAULT_BACKEND_PORT
+  const envBackendPort = process.env.BACKEND_PORT ? Number(process.env.BACKEND_PORT) : null
+  const backendPort = envBackendPort && Number.isInteger(envBackendPort) && envBackendPort > 0
+    ? envBackendPort
+    : rootConfig.server?.port ?? DEFAULT_BACKEND_PORT
   const frontend = rootConfig.frontend ?? {}
 
   return {

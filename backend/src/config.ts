@@ -151,6 +151,11 @@ export function loadConfig(): AppConfig {
   const server = cfg.server ?? {} as Partial<AppConfig["server"]>
   const freecad = cfg.freecad ?? {} as Partial<AppConfig["freecad"]>
   const logging = cfg.logging ?? {} as Partial<AppConfig["logging"]>
+  const envServerPort = process.env.BACKEND_PORT ? Number(process.env.BACKEND_PORT) : null
+
+  if (envServerPort !== null && (!Number.isInteger(envServerPort) || envServerPort <= 0)) {
+    die(`BACKEND_PORT 必须是正整数: ${process.env.BACKEND_PORT}`)
+  }
 
   return {
     openai: {
@@ -170,7 +175,7 @@ export function loadConfig(): AppConfig {
       skipGitRepoCheck: codex.skipGitRepoCheck ?? true,
     },
     server: {
-      port: server.port ?? 3001,
+      port: envServerPort ?? server.port ?? 3001,
       host: server.host ?? "0.0.0.0",
       corsOrigin: normalizeCorsOrigin(server.corsOrigin),
     },

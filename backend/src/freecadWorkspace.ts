@@ -5,7 +5,7 @@ const ROOT_CONFIG_JSON = path.resolve(process.cwd(), "..", "..", "config.json")
 const DEFAULT_WORKSPACE_ROOT = path.resolve(process.cwd(), "..", "..", "FreeCAD_data")
 
 type RootConfig = {
-  FREECAD_WORKSPACE_DIR?: unknown
+  WORKSPACE_DIR?: unknown
   freecad?: {
     workspaceDir?: unknown
     workspace_dir?: unknown
@@ -31,7 +31,10 @@ async function readRootConfig() {
 }
 
 function getConfiguredWorkspaceDir(config: RootConfig) {
-  const configured = config.freecad?.workspaceDir ?? config.freecad?.workspace_dir ?? config.FREECAD_WORKSPACE_DIR
+  const configured =
+    config.WORKSPACE_DIR ??
+    config.freecad?.workspaceDir ??
+    config.freecad?.workspace_dir
   return isNonEmptyString(configured) ? path.resolve(configured) : null
 }
 
@@ -49,7 +52,7 @@ async function pathExists(filePath: string) {
 
 async function inspectWorkspace(root: string, name: string): Promise<FreecadWorkspaceItem> {
   const workspacePath = path.join(root, name)
-  const required = ["00_inputs", "01_layout", "logs"]
+  const required = ["00_inputs", "01_layout", "component_info", "logs"]
   const missing: string[] = []
 
   for (const dirname of required) {
@@ -74,8 +77,8 @@ export async function getConfiguredFreecadWorkspaceDir() {
   const configuredWorkspaceDir = getConfiguredWorkspaceDir(config)
   if (configuredWorkspaceDir) return configuredWorkspaceDir
 
-  if (isNonEmptyString(process.env.FREECAD_WORKSPACE_DIR)) {
-    return path.resolve(process.env.FREECAD_WORKSPACE_DIR)
+  if (isNonEmptyString(process.env.WORKSPACE_DIR)) {
+    return path.resolve(process.env.WORKSPACE_DIR)
   }
 
   return null
@@ -105,7 +108,7 @@ export async function listFreecadWorkspaces() {
       ? path.basename(configuredWorkspaceDir)
       : null,
     effective: effectiveWorkspaceDir,
-    envOverride: isNonEmptyString(process.env.FREECAD_WORKSPACE_DIR),
+    envOverride: isNonEmptyString(process.env.WORKSPACE_DIR),
     items,
   }
 }
@@ -130,10 +133,6 @@ export async function setFreecadWorkspace(name: unknown) {
   if (relative.startsWith("..") || path.isAbsolute(relative)) {
     throw new Error("workspace must be under the configured FreeCAD_data root")
   }
-  if (!workspace.valid) {
-    throw new Error(`workspace is missing required directories: ${workspace.missing.join(", ")}`)
-  }
-
   config.freecad = {
     ...(config.freecad ?? {}),
     workspaceDir: workspace.path,

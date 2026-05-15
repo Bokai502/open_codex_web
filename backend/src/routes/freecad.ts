@@ -67,6 +67,12 @@ type RenderableModel = {
 }
 
 type ProgressData = NonNullable<Awaited<ReturnType<typeof buildProgressDataFromManifest>>>
+type WorkspaceProgressData = {
+  data: unknown
+  sourcePath: string
+  sourceVersion: string
+  updatedAt: string
+}
 
 type RegistryLocation = {
   registryDir: string
@@ -87,10 +93,11 @@ const DEFAULT_FREECAD_RUNTIME_CONFIG = path.resolve(
 )
 const DEFAULT_ASSEMBLY_BUILDS_DIR = "assembly_builds"
 const DEFAULT_ARTIFACT_REGISTRY_DIR = path.join("logs", "registry")
-const DEFAULT_GEOM_COMPONENT_INFO_RELATIVE_PATH = path.join("01_layout", "geom_component_info.json")
+const DEFAULT_GEOM_COMPONENT_INFO_RELATIVE_PATH = path.join("component_info", "geom_component_info.json")
 const DEFAULT_BOM_INFO_RELATIVE_PATH = path.join("00_inputs", "bom_component_info.json")
 const DEFAULT_REAL_BOM_RELATIVE_PATH = path.join("00_inputs", "real_bom.json")
 const DEFAULT_PROGRESS_PERCENTAGES_RELATIVE_PATH = path.join("logs", "progress_percentages.json")
+const DEFAULT_GEOMETRY_AFTER_GLB_RELATIVE_PATH = path.join("02_geometry_edit", "geometry_after.glb")
 const COMPONENT_INFO_ASSEMBLY_STEM = "component_info_assembly"
 const LAYOUT_ASSEMBLY_STEM = "geometry_after"
 
@@ -128,12 +135,12 @@ async function resolveConfiguredWorkspaceDir() {
   try {
     const raw = await fs.readFile(runtimeConfigPath, "utf-8")
     const config = parseSimpleConfig(raw)
-    const configuredWorkspaceDir = config.get("FREECAD_WORKSPACE_DIR")
+    const configuredWorkspaceDir = config.get("WORKSPACE_DIR")
     if (isNonEmptyString(configuredWorkspaceDir)) {
       return path.resolve(configuredWorkspaceDir)
     }
   } catch {
-    // Fall back to the legacy workspace path below.
+    // Fall back to the configured workspace resolver below.
   }
 
   return rootConfigWorkspaceDir
@@ -314,6 +321,10 @@ async function resolveModelFromGlbPath(glbPath: string | undefined) {
       fileVersion.size,
     ].join(":"),
   }
+}
+
+async function resolveDefaultGeometryAfterModel() {
+  return resolveModelFromGlbPath(DEFAULT_GEOMETRY_AFTER_GLB_RELATIVE_PATH)
 }
 
 function resolveGlbPath(
@@ -497,7 +508,11 @@ async function resolveModel(
   variant: ModelVariant = "original",
   glbPath?: string,
 ) {
-  return (await resolveModelFromGlbPath(glbPath)) ?? resolveModelFromRegistry(sessionId, runId, variant)
+  return (
+    (await resolveModelFromGlbPath(glbPath)) ??
+    (await resolveDefaultGeometryAfterModel()) ??
+    resolveModelFromRegistry(sessionId, runId, variant)
+  )
 }
 
 async function pathExists(filePath: string | null) {
@@ -651,6 +666,29 @@ async function resolveProgressFromLatestSessionRun(sessionId: string) {
   return null
 }
 
+function isPipelineProgressPayload(data: unknown) {
+  return Boolean(
+    data &&
+    typeof data === "object" &&
+    !Array.isArray(data) &&
+    (data as { schema_version?: unknown }).schema_version === "1.0" &&
+    Array.isArray((data as { steps?: unknown }).steps),
+  )
+}
+
+async function readWorkspaceProgress(progressPath: string): Promise<WorkspaceProgressData | null> {
+  const raw = await fs.readFile(progressPath, "utf-8").catch(() => null)
+  if (raw === null) return null
+
+  const stat = await fs.stat(progressPath)
+  return {
+    data: JSON.parse(raw) as unknown,
+    sourcePath: progressPath,
+    sourceVersion: [progressPath, stat.mtimeMs, stat.size].join(":"),
+    updatedAt: stat.mtime.toISOString(),
+  }
+}
+
 export async function freecadRoutes(fastify: FastifyInstance) {
   fastify.get("/api/freecad/workspaces", async (_req, reply) => {
     try {
@@ -735,6 +773,33 @@ export async function freecadRoutes(fastify: FastifyInstance) {
       const progressPath = path.join(workspaceDir, DEFAULT_PROGRESS_PERCENTAGES_RELATIVE_PATH)
       const sessionId = req.query.sessionId?.trim()
 
+      let workspaceProgress: WorkspaceProgressData | null = null
+      try {
+        workspaceProgress = await readWorkspaceProgress(progressPath)
+      } catch {
+        const stat = await fs.stat(progressPath).catch(() => null)
+        reply.header("Cache-Control", "no-cache")
+        return reply.send({
+          exists: false,
+          data: null,
+          error: "progress json is not valid yet",
+          source_path: progressPath,
+          source_version: stat ? [progressPath, stat.mtimeMs, stat.size].join(":") : null,
+          updated_at: stat?.mtime.toISOString() ?? null,
+        })
+      }
+
+      if (workspaceProgress && isPipelineProgressPayload(workspaceProgress.data)) {
+        reply.header("Cache-Control", "no-cache")
+        return reply.send({
+          exists: true,
+          data: workspaceProgress.data,
+          source_path: workspaceProgress.sourcePath,
+          source_version: workspaceProgress.sourceVersion,
+          updated_at: workspaceProgress.updatedAt,
+        })
+      }
+
       if (isNonEmptyString(sessionId)) {
         const sessionRunProgress = await resolveProgressFromLatestSessionRun(sessionId)
         if (sessionRunProgress) {
@@ -749,10 +814,8 @@ export async function freecadRoutes(fastify: FastifyInstance) {
         }
       }
 
-      const raw = await fs.readFile(progressPath, "utf-8").catch(() => null)
-
       reply.header("Cache-Control", "no-cache")
-      if (raw === null) {
+      if (!workspaceProgress) {
         return reply.send({
           exists: false,
           data: null,
@@ -761,27 +824,12 @@ export async function freecadRoutes(fastify: FastifyInstance) {
         })
       }
 
-      const stat = await fs.stat(progressPath)
-      let data: unknown
-      try {
-        data = JSON.parse(raw)
-      } catch {
-        return reply.send({
-          exists: false,
-          data: null,
-          error: "progress json is not valid yet",
-          source_path: progressPath,
-          source_version: [progressPath, stat.mtimeMs, stat.size].join(":"),
-          updated_at: stat.mtime.toISOString(),
-        })
-      }
-
       return reply.send({
         exists: true,
-        data,
-        source_path: progressPath,
-        source_version: [progressPath, stat.mtimeMs, stat.size].join(":"),
-        updated_at: stat.mtime.toISOString(),
+        data: workspaceProgress.data,
+        source_path: workspaceProgress.sourcePath,
+        source_version: workspaceProgress.sourceVersion,
+        updated_at: workspaceProgress.updatedAt,
       })
     } catch {
       return reply.status(500).send({ error: "failed to resolve freecad progress data" })

@@ -141,13 +141,13 @@ export function createAnnotationLabel(id: string, palette: AnnotationPalette) {
   labelEl.style.position = "absolute"
   labelEl.style.display = "flex"
   labelEl.style.alignItems = "center"
-  labelEl.style.gap = "8px"
-  labelEl.style.padding = "5px 10px"
+  labelEl.style.gap = "6px"
+  labelEl.style.padding = "4px 8px"
   labelEl.style.border = "1px solid rgba(122, 148, 212, 0.42)"
   labelEl.style.borderLeft = `3px solid ${palette.dot}`
-  labelEl.style.borderRadius = "4px"
+  labelEl.style.borderRadius = "6px"
   labelEl.style.background = palette.tint
-  labelEl.style.boxShadow = "0 12px 28px rgba(3, 8, 20, 0.32)"
+  labelEl.style.boxShadow = "0 10px 22px rgba(3, 8, 20, 0.28)"
   labelEl.style.backdropFilter = "blur(8px)"
   labelEl.style.cursor = "pointer"
   labelEl.style.pointerEvents = "auto"
@@ -171,9 +171,12 @@ export function createAnnotationLabel(id: string, palette: AnnotationPalette) {
   textEl.textContent = id
   textEl.style.color = palette.text
   textEl.style.fontFamily = "\"IBM Plex Mono\", \"SFMono-Regular\", Consolas, monospace"
-  textEl.style.fontSize = "12px"
+  textEl.style.fontSize = "11px"
   textEl.style.fontWeight = "700"
-  textEl.style.letterSpacing = "0.18em"
+  textEl.style.letterSpacing = "0.12em"
+  textEl.style.maxWidth = "124px"
+  textEl.style.overflow = "hidden"
+  textEl.style.textOverflow = "ellipsis"
   textEl.style.textTransform = "uppercase"
   labelEl.appendChild(textEl)
 

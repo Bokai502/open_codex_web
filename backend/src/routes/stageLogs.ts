@@ -17,6 +17,9 @@ type StageLogEntry = {
 const MAX_FILES = 100
 const MAX_DEPTH = 4
 const MAX_ENTRIES = 300
+const IGNORED_LOG_RELATIVE_PATHS = new Set([
+  path.join("registry", "index.json"),
+])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
@@ -144,6 +147,11 @@ async function listJsonFiles(dir: string, depth = 0): Promise<string[]> {
   return files.slice(0, MAX_FILES)
 }
 
+function isIgnoredLogFile(filePath: string, logDir: string) {
+  const relativePath = path.relative(logDir, filePath)
+  return IGNORED_LOG_RELATIVE_PATHS.has(relativePath)
+}
+
 function sortEntries(entries: StageLogEntry[]) {
   return [...entries].sort((left, right) => {
     const leftTime = Date.parse(left.time)
@@ -158,13 +166,16 @@ export async function stageLogsRoutes(fastify: FastifyInstance) {
     const configuredWorkspaceDir = await resolveFreecadWorkspaceDir().catch(() => null)
     const candidateDirs = [
       configuredWorkspaceDir ? path.join(configuredWorkspaceDir, "logs") : null,
-      process.env.FREECAD_WORKSPACE_DIR ? path.join(path.resolve(process.env.FREECAD_WORKSPACE_DIR), "logs") : null,
+      process.env.WORKSPACE_DIR ? path.join(path.resolve(process.env.WORKSPACE_DIR), "logs") : null,
       path.resolve(process.cwd(), "..", "logs"),
       path.resolve(process.cwd(), "logs"),
       path.resolve(process.cwd(), "..", "FreeCAD_data", "v6_data", "logs"),
     ]
       .filter((dir): dir is string => !!dir)
-    const jsonFiles = [...new Set((await Promise.all(candidateDirs.map(dir => listJsonFiles(dir)))).flat())]
+    const jsonFiles = [...new Set((await Promise.all(candidateDirs.map(async dir => {
+      const files = await listJsonFiles(dir)
+      return files.filter(filePath => !isIgnoredLogFile(filePath, dir))
+    }))).flat())]
     const entries: StageLogEntry[] = []
 
     for (const filePath of jsonFiles) {

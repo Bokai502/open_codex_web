@@ -19,10 +19,10 @@ export type ProgressEntry = {
 const WORKFLOW_PROGRESS_STAGES: ProgressEntry[] = [
   { fileNames: [], key: "layout", label: "workspace.progress.layout", percent: 0 },
   { fileNames: [], key: "modeling", label: "workspace.progress.modeling", percent: 0 },
-  { fileNames: [], key: "export_file_percent", label: "workspace.progress.exportFile", percent: 0 },
-  { fileNames: [], key: "case_build", label: "workspace.progress.caseBuild", percent: 0 },
   { fileNames: [], key: "simulation_run", label: "workspace.progress.simulationRun", percent: 0 },
   { fileNames: [], key: "field_export", label: "workspace.progress.fieldExport", percent: 0 },
+  { fileNames: [], key: "postprocess", label: "workspace.progress.postprocess", percent: 0 },
+  { fileNames: [], key: "case_build", label: "workspace.progress.caseBuild", percent: 0 },
   { fileNames: [], key: "analysis", label: "workspace.progress.analysis", percent: 0 },
   { fileNames: [], key: "suggestion", label: "workspace.progress.suggestion", percent: 0 },
 ]
@@ -53,6 +53,7 @@ function progressLabel(key: string, t: TFunction) {
     step: "STEP",
     preview: t("workspace.progress.preview"),
     simulation: t("workspace.progress.simulationRun"),
+    postprocess: t("workspace.progress.postprocess"),
     analysis: t("workspace.progress.analysis"),
   }
   return labels[normalized] ?? key
@@ -78,6 +79,7 @@ function normalizeProgressKey(key: string) {
     simulation: "simulation_run",
     simulationrun: "simulation_run",
     fieldexport: "field_export",
+    postprocess: "postprocess",
     analysis: "analysis",
     suggestion: "suggestion",
   }
@@ -125,14 +127,79 @@ function normalizePercent(value: unknown) {
   return Math.max(0, Math.min(100, Math.round(percent)))
 }
 
+function getStepProgressKey(item: Record<string, unknown>, index: number) {
+  return typeof item.stage_name === "string"
+    ? item.stage_name
+    : typeof item.command_name === "string"
+      ? item.command_name
+      : typeof item.key === "string"
+        ? item.key
+        : typeof item.name === "string"
+          ? item.name
+          : typeof item.label === "string"
+            ? item.label
+            : `step_${index + 1}`
+}
+
+function getNestedFreecadProgress(data: unknown) {
+  if (!isRecord(data)) return null
+  if (isRecord(data.freecad_progress)) return data.freecad_progress
+
+  if (Array.isArray(data.steps)) {
+    const freecadStep = data.steps.find(step =>
+      isRecord(step) && isRecord(step.freecad_progress),
+    )
+    if (isRecord(freecadStep) && isRecord(freecadStep.freecad_progress)) {
+      return freecadStep.freecad_progress
+    }
+  }
+
+  return null
+}
+
 export function getProgressEntries(data: unknown, t: TFunction): ProgressEntry[] {
+  const outputFilesByKey = getProgressOutputFilesByKey(data)
+
+  if (isRecord(data) && Array.isArray(data.steps)) {
+    const entries: ProgressEntry[] = []
+
+    data.steps.forEach((item, index) => {
+      if (!isRecord(item)) return
+      const key = getStepProgressKey(item, index)
+      const percent = normalizePercent(item.percent ?? item.percentage ?? item.progress ?? item.value)
+      if (percent === null) return
+      const stepFiles = isRecord(item.freecad_progress)
+        ? getProgressFiles(item.freecad_progress).map(getDisplayFileName)
+        : []
+      entries.push({
+        fileNames: outputFilesByKey.get(key) ?? outputFilesByKey.get(normalizeProgressKey(key)) ?? stepFiles,
+        key,
+        label: typeof item.command_name === "string" ? progressLabel(item.command_name, t) : progressLabel(key, t),
+        percent,
+      })
+    })
+
+    const freecadProgress = getNestedFreecadProgress(data)
+    if (isRecord(freecadProgress)) {
+      const freecadEntries = getProgressEntries(freecadProgress, t)
+      const existingKeys = new Set(entries.map(entry => normalizeProgressKey(entry.key)))
+      for (const entry of freecadEntries) {
+        const normalizedKey = normalizeProgressKey(entry.key)
+        if (existingKeys.has(normalizedKey) || normalizedKey === "export_file_percent") continue
+        entries.push(entry)
+        existingKeys.add(normalizedKey)
+      }
+    }
+
+    return entries
+  }
+
   const progressData = isRecord(data) && isRecord(data.progress_percentages)
     ? data.progress_percentages
     : isRecord(data) && isRecord(data.progress)
       ? data.progress
       : data
   const entries: ProgressEntry[] = []
-  const outputFilesByKey = getProgressOutputFilesByKey(data)
 
   if (Array.isArray(progressData)) {
     progressData.forEach((item, index) => {
@@ -174,36 +241,52 @@ export function getProgressEntries(data: unknown, t: TFunction): ProgressEntry[]
 
 function getProgressOutputFilesByKey(data: unknown) {
   const files = new Map<string, string[]>()
-  if (!isRecord(data) || !isRecord(data.output_files)) return files
-  const showFinalOutputs = data.success === true
+  if (!isRecord(data)) return files
 
-  for (const [key, value] of Object.entries(data.output_files)) {
-    const names: string[] = []
-    if (typeof value === "string") {
-      if (!showFinalOutputs && ["step", "glb", "replaced_step", "replaced_glb"].includes(key)) continue
-      names.push(getDisplayFileName(value))
-    } else if (isRecord(value)) {
-      if (value.exists !== true) continue
-      const pathValue = value.path ?? value.file ?? value.name
-      if (typeof pathValue === "string") names.push(getDisplayFileName(pathValue))
+  const addOutputFiles = (source: Record<string, unknown>, showFinalOutputs: boolean) => {
+    if (!isRecord(source.output_files)) return
+
+    for (const [key, value] of Object.entries(source.output_files)) {
+      const names: string[] = []
+      if (typeof value === "string") {
+        if (!showFinalOutputs && ["step", "glb", "replaced_step", "replaced_glb"].includes(key)) continue
+        names.push(getDisplayFileName(value))
+      } else if (isRecord(value)) {
+        if (value.exists !== true) continue
+        const pathValue = value.path ?? value.file ?? value.name
+        if (typeof pathValue === "string") names.push(getDisplayFileName(pathValue))
+      }
+
+      if (names.length === 0) continue
+      const existingNames = files.get(key) ?? []
+      files.set(key, [...existingNames, ...names])
+      if (key === "step" || key === "glb") {
+        const exportNames = files.get("export_file_percent") ?? []
+        files.set("export_file_percent", [...exportNames, ...names])
+      }
     }
+  }
 
-    if (names.length === 0) continue
-    files.set(key, names)
-    if (key === "step" || key === "glb") {
-      const exportNames = files.get("export_file_percent") ?? []
-      files.set("export_file_percent", [...exportNames, ...names])
+  addOutputFiles(data, data.success === true || typeof data.overall_percent === "number")
+
+  const freecadProgress = getNestedFreecadProgress(data)
+  if (isRecord(freecadProgress)) addOutputFiles(freecadProgress, freecadProgress.success === true)
+
+  if (Array.isArray(data.steps)) {
+    for (const step of data.steps) {
+      if (!isRecord(step)) continue
+      addOutputFiles(step, step.status === "completed" || step.success === true)
+      if (isRecord(step.freecad_progress)) addOutputFiles(step.freecad_progress, step.freecad_progress.success === true)
     }
   }
 
   return files
 }
 
-export function getProgressFiles(data: unknown) {
-  if (!isRecord(data)) return []
+function collectProgressFiles(data: unknown, paths: Set<string>) {
+  if (!isRecord(data)) return
   const candidates = [data.files, data.key_files, data.artifacts, data.outputs, data.output_files]
-  const paths = new Set<string>()
-  const showFinalOutputs = data.success === true
+  const showFinalOutputs = data.success === true || typeof data.overall_percent === "number"
 
   for (const candidate of candidates) {
     if (Array.isArray(candidate)) {
@@ -230,6 +313,18 @@ export function getProgressFiles(data: unknown) {
     }
   }
 
+  const freecadProgress = getNestedFreecadProgress(data)
+  if (freecadProgress && freecadProgress !== data) collectProgressFiles(freecadProgress, paths)
+
+  if (Array.isArray(data.steps)) {
+    for (const step of data.steps) collectProgressFiles(step, paths)
+  }
+}
+
+export function getProgressFiles(data: unknown) {
+  if (!isRecord(data)) return []
+  const paths = new Set<string>()
+  collectProgressFiles(data, paths)
   return [...paths].slice(0, 6)
 }
 

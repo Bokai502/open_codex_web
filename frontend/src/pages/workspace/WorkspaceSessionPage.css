@@ -152,6 +152,7 @@
 }
 .wa-workspace-button:hover { background: rgba(255, 255, 255, 0.9); color: #1d1d1f; }
 .wa-workspace-button span:first-child {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -185,6 +186,7 @@
   display: block;
   width: 100%;
   min-height: 46px;
+  overflow: hidden;
   border: 0;
   border-radius: 12px;
   background: transparent;
@@ -197,9 +199,12 @@
 .wa-workspace-item:disabled { cursor: not-allowed; opacity: 0.48; }
 .wa-workspace-item strong {
   display: block;
+  overflow: hidden;
   color: #1d1d1f;
   font-size: 12.5px;
   line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .wa-workspace-item span {
   display: block;

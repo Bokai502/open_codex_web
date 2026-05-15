@@ -10,11 +10,7 @@ import { AgentUnderstandingPanel } from "./workspace/AgentUnderstandingPanel"
 import { RunLogPanel } from "./workspace/RunLogPanel"
 import {
   formatProgressUpdatedAt,
-  getFileNames,
-  getLatestSessionGlbPath,
   getProgressEntries,
-  getProgressFiles,
-  getViewerGlbPath,
   getWorkflowProgressEntries,
   type FreecadProgressResponse,
 } from "./workspace/progressUtils"
@@ -28,6 +24,7 @@ import {
 import "./workspace/WorkspaceSessionPage.css"
 
 const WORKSPACE_HOME_PATH = "/workspace"
+const WORKSPACE_GEOMETRY_AFTER_GLB_PATH = "02_geometry_edit/geometry_after.glb"
 
 type ViewerComponentMessage = {
   componentId?: unknown
@@ -103,7 +100,6 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
   const [workspaceOpen, setWorkspaceOpen] = useState(false)
   const [workspaceChanging, setWorkspaceChanging] = useState(false)
   const [hoveredWorkspaceName, setHoveredWorkspaceName] = useState<string | null>(null)
-  const [lastGlbPathsBySession, setLastGlbPathsBySession] = useState<Record<string, string>>({})
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null)
   const [deleteError, setDeleteError] = useState("")
   const [deletePending, setDeletePending] = useState(false)
@@ -143,26 +139,19 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
   })), [menuWorkspaceItems, sortedSessions])
   const hoveredWorkspaceSessions = sessionsByWorkspace.find(item => item.name === hoveredWorkspace?.name)?.sessions ?? []
   const selectedBom = bomInfo.components.find(component => component.componentId === selectedBomId) ?? bomInfo.components[0]
-  const fileNames = useMemo(() => getFileNames(turns, currentEvents), [turns, currentEvents])
   const progressEntries = useMemo(() => getProgressEntries(progressData?.data, t), [progressData, t])
   const workflowProgressEntries = useMemo(() => getWorkflowProgressEntries(progressEntries, t), [progressEntries, t])
-  const progressFiles = useMemo(() => getProgressFiles(progressData?.data), [progressData])
   const runLogEntries = useMemo(() => getRunLogEntries(turns, currentEvents, t), [currentEvents, t, turns])
   const logEntries = useMemo(() => getDisplayLogEntries(stageLogs, runLogEntries), [runLogEntries, stageLogs])
   const selectedLog = logEntries.find(entry => entry.id === selectedLogId) ?? logEntries[0] ?? null
-  const displayedFileNames = progressFiles.length > 0 ? progressFiles : fileNames
-  const latestProgressGlbPath = useMemo(() => getViewerGlbPath(displayedFileNames), [displayedFileNames])
-  const latestSessionGlbPath = useMemo(() => getLatestSessionGlbPath(turns, currentEvents), [turns, currentEvents])
-  const latestGlbPath = latestSessionGlbPath ?? latestProgressGlbPath
-  const previewGlbPath = activeSessionId ? latestGlbPath ?? lastGlbPathsBySession[activeSessionId] ?? null : latestGlbPath
   const viewerHref = useMemo(() => {
     const params = new URLSearchParams()
     if (activeSessionId) params.set("sessionId", activeSessionId)
-    if (previewGlbPath) params.set("glbPath", previewGlbPath)
+    params.set("glbPath", WORKSPACE_GEOMETRY_AFTER_GLB_PATH)
     if (workspaceRefreshNonce > 0) params.set("workspaceVersion", String(workspaceRefreshNonce))
     const query = params.toString()
     return query ? `/viewer?${query}` : "/viewer"
-  }, [activeSessionId, previewGlbPath, workspaceRefreshNonce])
+  }, [activeSessionId, workspaceRefreshNonce])
   const freecadHref = "http://10.110.10.11:7080/vnc.html?autoconnect=true&resize=scale&path=websockify"
   const paraviewHref = "http://10.110.10.11:6081/vnc.html?autoconnect=true&resize=scale&path=websockify"
   const comsolHref = "http://10.110.10.11:6082/vnc.html?autoconnect=true&resize=scale&path=websockify"
@@ -281,15 +270,6 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
     window.addEventListener("message", handleViewerMessage)
     return () => window.removeEventListener("message", handleViewerMessage)
   }, [])
-
-  useEffect(() => {
-    if (!activeSessionId || !latestGlbPath) return
-    setLastGlbPathsBySession(prev => (
-      prev[activeSessionId] === latestGlbPath
-        ? prev
-        : { ...prev, [activeSessionId]: latestGlbPath }
-    ))
-  }, [activeSessionId, latestGlbPath])
 
   useEffect(() => {
     setProgressData(null)
@@ -415,8 +395,9 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
                         <button
                           type="button"
                           className={`wa-workspace-item${item.name === currentWorkspaceName ? " active" : ""}`}
-                          disabled={item.name !== UNASSIGNED_WORKSPACE_NAME && (!item.valid || workspaceChanging)}
+                          disabled={item.name !== UNASSIGNED_WORKSPACE_NAME && workspaceChanging}
                           key={item.name}
+                          title={item.name === UNASSIGNED_WORKSPACE_NAME ? t("workspace.unassignedHistory") : item.name}
                           onClick={() => {
                             if (item.name !== UNASSIGNED_WORKSPACE_NAME) handleSelectWorkspace(item.name)
                           }}
@@ -424,7 +405,7 @@ export function WorkspaceAppleContent({ state }: WorkspaceAppleContentProps) {
                           onMouseEnter={() => setHoveredWorkspaceName(item.name)}
                         >
                           <strong>{item.name === UNASSIGNED_WORKSPACE_NAME ? t("workspace.unassignedHistory") : item.name}</strong>
-                          <span>{item.valid ? t("workspace.historyCount", { count: getWorkspaceSessionCount(item) }) : t("workspace.missing", { items: item.missing?.join(", ") || t("workspace.requiredDirs") })}</span>
+                          <span>{t("workspace.historyCount", { count: getWorkspaceSessionCount(item) })}</span>
                         </button>
                       ))
                     )}

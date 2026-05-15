@@ -9,6 +9,8 @@ import type { AppConfig } from "../config.js"
 import type { Logger } from "../logger.js"
 import { initializeFreecadProgressForSession } from "../freecadProgress.js"
 import { resolveFreecadWorkspaceDir } from "../freecadWorkspace.js"
+import { readSkillInstructions } from "../skills.js"
+import type { SkillInstruction } from "../skills.js"
 
 type CodexConfigValue = string | number | boolean | CodexConfigValue[] | CodexConfigObject
 type CodexConfigObject = {
@@ -44,7 +46,7 @@ interface AskUserPayload {
 }
 
 interface RunContext {
-  freecadWorkspaceDir: string | null
+  workspaceDir: string | null
   sessionId: string
   threadId: string | null
   turnId: string
@@ -156,35 +158,56 @@ function summarizeCodexEvent(event: unknown): Record<string, unknown> {
   return summary
 }
 
-function buildPromptPrefix(skillNames: string[], context: RunContext) {
+function formatSkillInstructions(skills: SkillInstruction[]) {
+  if (skills.length === 0) return ""
+
+  const blocks = skills.map(skill => [
+    `## ${skill.name}`,
+    skill.description ? `Description: ${skill.description}` : null,
+    `Source: ${skill.file}`,
+    "",
+    skill.content.trim(),
+  ].filter((line): line is string => line !== null).join("\n"))
+
+  return [
+    "Selected skill instructions:",
+    "Use these local SKILL.md instructions as authoritative guidance for this turn, even if the runtime's startup skill list is stale.",
+    "",
+    ...blocks,
+  ].join("\n\n")
+}
+
+function buildPromptPrefix(skillNames: string[], skillInstructions: SkillInstruction[], context: RunContext) {
   const skillPrefix = skillNames.length > 0
-    ? `Please use the following skills if applicable: ${skillNames.join(", ")}.\n\n`
+    ? `Please use the following skills if applicable: ${skillNames.join(", ")}.\n\n${formatSkillInstructions(skillInstructions)}\n\n`
     : ""
   const executionContext = [
     "Execution context:",
     `- session_id: ${context.sessionId}`,
     `- thread_id: ${context.threadId ?? "null"}`,
     `- turn_id: ${context.turnId}`,
-    `- freecad_workspace_dir: ${context.freecadWorkspaceDir ?? "null"}`,
+    `- workspace_dir: ${context.workspaceDir ?? "null"}`,
     "",
-    "When invoking any freecad-* CLI command, pass these values through environment variables:",
+    "Use this same workspace_dir path for cad-sim-pipeline, freecad-* commands, artifact inspection, and logs.",
+    "When invoking CLI commands, pass these values through environment variables:",
     `- FREECAD_SESSION_ID=${context.sessionId}`,
     `- FREECAD_THREAD_ID=${context.threadId ?? ""}`,
     `- FREECAD_TURN_ID=${context.turnId}`,
     "- FREECAD_CALLER=open_codex_web",
     "- FREECAD_AGENT_NAME=codex",
-    context.freecadWorkspaceDir
-      ? `- FREECAD_WORKSPACE_DIR=${context.freecadWorkspaceDir}`
-      : "- FREECAD_WORKSPACE_DIR=",
-    context.freecadWorkspaceDir
-      ? `Also pass --workspace ${context.freecadWorkspaceDir} to freecad-* CLI commands whenever the command supports it.`
-      : "No FreeCAD workspace is currently configured; ask before running FreeCAD CLI commands.",
+    context.workspaceDir
+      ? `- WORKSPACE_DIR=${context.workspaceDir}`
+      : "- WORKSPACE_DIR=",
+    context.workspaceDir
+      ? `Also pass --workspace ${context.workspaceDir} to freecad-* CLI commands whenever the command supports it.`
+      : "No workspace is currently configured; ask before running workspace-scoped CLI commands.",
   ].join("\n")
   return `${ASK_USER_PROTOCOL}\n\n${skillPrefix}${executionContext}`
 }
 
 function buildPrompt(prompt: string, skillNames: string[], context: RunContext) {
-  return `${buildPromptPrefix(skillNames, context)}\n\n${prompt.trim()}`
+  const skillInstructions = readSkillInstructions(skillNames)
+  return `${buildPromptPrefix(skillNames, skillInstructions, context)}\n\n${prompt.trim()}`
 }
 
 function isRunInputItem(item: unknown): item is RunInputItem {
@@ -213,7 +236,8 @@ function normalizeRunInput(input: unknown, prompt: unknown): RunInputItem[] | nu
 }
 
 function buildSdkInput(input: RunInputItem[], skillNames: string[], context: RunContext): string | RunInputItem[] {
-  const prefix = buildPromptPrefix(skillNames, context)
+  const skillInstructions = readSkillInstructions(skillNames)
+  const prefix = buildPromptPrefix(skillNames, skillInstructions, context)
   const firstTextIndex = input.findIndex(item => item.type === "text")
 
   if (firstTextIndex === -1) {
@@ -458,7 +482,7 @@ export async function taskRoutes(
         .filter(s => typeof s === "string" && s.trim() !== "")
         .map(s => s.trim())
       const runContext = {
-        freecadWorkspaceDir: await resolveFreecadWorkspaceDir().catch(() => null),
+        workspaceDir: await resolveFreecadWorkspaceDir().catch(() => null),
         sessionId: trimmedSessionId,
         threadId: typeof threadId === "string" && threadId.trim() !== "" ? threadId.trim() : null,
         turnId: trimmedTurnId,
@@ -481,7 +505,7 @@ export async function taskRoutes(
         prompt: promptTextForHistory,
         sessionId: trimmedSessionId,
         threadId: resolvedThreadId,
-        workspaceDir: runContext.freecadWorkspaceDir,
+        workspaceDir: runContext.workspaceDir,
       }).catch(err => logger.error("run session ensure failed", { err, sessionId: trimmedSessionId }))
 
       logger.info("codex run accepted", {
@@ -496,7 +520,7 @@ export async function taskRoutes(
         supportsWebsockets: config.openai.supportsWebsockets,
         modelReasoningEffort: config.codex.modelReasoningEffort,
         workingDirectory: config.codex.workingDirectory,
-        freecadWorkspaceDir: runContext.freecadWorkspaceDir,
+        workspaceDir: runContext.workspaceDir,
         approvalPolicy: config.codex.approvalPolicy,
         sandboxMode: config.codex.sandboxMode,
         promptChars: typeof prompt === "string" ? prompt.length : 0,
@@ -655,7 +679,7 @@ export async function taskRoutes(
             sessionId: trimmedSessionId,
             threadId: resolvedThreadId,
             turnId: trimmedTurnId,
-            workspaceDir: runContext.freecadWorkspaceDir,
+            workspaceDir: runContext.workspaceDir,
           }).catch(err => logger.error("run session completion failed", { err, sessionId: trimmedSessionId, turnId: trimmedTurnId }))
         }
         logger.info("codex run finished", {

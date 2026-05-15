@@ -25,6 +25,8 @@ import { applyTransparency, disposeModelResources, loadGltf } from "./viewer3d/m
 import type { Disposable, PartAnnotation, ResolvedModel, WebGPURendererRuntime } from "./viewer3d/types"
 
 const MAX_DEVICE_PIXEL_RATIO = 2
+const ANNOTATION_MAX_TRACKS_PER_SIDE = 3
+const ANNOTATION_TRACK_GAP = 10
 
 type ComponentDetail = {
   componentId: string
@@ -77,6 +79,7 @@ function parseComponentDetails(data: RawComponentInfo) {
 
 export default function ModelViewerPage() {
   const mountRef = useRef<HTMLDivElement>(null)
+  const axisSvgRef = useRef<SVGSVGElement>(null)
   const annotationSvgRef = useRef<SVGSVGElement>(null)
   const annotationLabelsRef = useRef<HTMLDivElement>(null)
   const componentDetailsRef = useRef<Record<string, ComponentDetail>>({})
@@ -109,10 +112,11 @@ export default function ModelViewerPage() {
 
   useEffect(() => {
     const mount = mountRef.current
+    const axisSvg = axisSvgRef.current
     const annotationSvg = annotationSvgRef.current
     const annotationLabels = annotationLabelsRef.current
 
-    if (!mount || !annotationSvg || !annotationLabels) return
+    if (!mount || !axisSvg || !annotationSvg || !annotationLabels) return
 
     let disposed = false
     let renderer: WebGPURendererRuntime | null = null
@@ -132,6 +136,8 @@ export default function ModelViewerPage() {
     const highlightMaterials = new Set<THREE.Material>()
     const screenPoint = new THREE.Vector3()
     const cameraSpacePoint = new THREE.Vector3()
+    const axisDirection = new THREE.Vector3()
+    const cameraInverse = new THREE.Quaternion()
     let annotationsNeedLayout = false
     let highlightedComponentId: string | null = null
 
@@ -151,6 +157,38 @@ export default function ModelViewerPage() {
       annotationsNeedLayout = false
       annotationLabels.replaceChildren()
       annotationSvg.replaceChildren()
+    }
+
+    const updateAxisOverlay = (camera: THREE.PerspectiveCamera) => {
+      camera.getWorldQuaternion(cameraInverse).invert()
+
+      const origin = { x: 28, y: 62 }
+      const axisLength = 34
+      const axes = [
+        { key: "x", vector: new THREE.Vector3(1, 0, 0) },
+        { key: "y", vector: new THREE.Vector3(0, 0, -1) },
+        { key: "z", vector: new THREE.Vector3(0, 1, 0) },
+      ]
+
+      axes.forEach(({ key, vector }) => {
+        axisDirection.copy(vector).applyQuaternion(cameraInverse).normalize()
+        const depthScale = 0.68 + Math.max(axisDirection.z, -0.6) * 0.18
+        const endX = origin.x + axisDirection.x * axisLength * depthScale
+        const endY = origin.y - axisDirection.y * axisLength * depthScale
+        const labelX = origin.x + axisDirection.x * (axisLength + 10) * depthScale
+        const labelY = origin.y - axisDirection.y * (axisLength + 10) * depthScale
+
+        const line = axisSvg.querySelector<SVGLineElement>(`[data-axis-line="${key}"]`)
+        const label = axisSvg.querySelector<SVGTextElement>(`[data-axis-label="${key}"]`)
+        if (!line || !label) return
+
+        line.setAttribute("x1", `${origin.x}`)
+        line.setAttribute("y1", `${origin.y}`)
+        line.setAttribute("x2", `${endX}`)
+        line.setAttribute("y2", `${endY}`)
+        label.setAttribute("x", `${labelX}`)
+        label.setAttribute("y", `${labelY}`)
+      })
     }
 
     const setAnnotationActiveState = (componentId: string | null) => {
@@ -279,10 +317,10 @@ export default function ModelViewerPage() {
 
       syncCameraForAnnotations(camera)
 
-      const safeTop = 86
-      const safeBottom = viewportHeight - 28
-      const sidePadding = 26
-      const labelGap = 10
+      const safeTop = 84
+      const safeBottom = viewportHeight - 52
+      const sidePadding = viewportWidth < 700 ? 12 : 18
+      const labelGap = 6
 
       annotationSvg.setAttribute("viewBox", `0 0 ${viewportWidth} ${viewportHeight}`)
 
@@ -327,42 +365,65 @@ export default function ModelViewerPage() {
         items: typeof leftItems,
         side: "left" | "right",
       ) => {
-        const tops = distributeLabelTops(
-          items.map((item) => ({
-            desiredTop: item.screenY - item.height * 0.5,
-            height: item.height,
-          })),
-          safeTop,
-          safeBottom,
-          labelGap,
+        if (items.length === 0) return
+
+        const usableHeight = Math.max(safeBottom - safeTop, 1)
+        const tallestItemHeight = Math.max(...items.map((item) => item.height))
+        const singleTrackCapacity = Math.max(
+          1,
+          Math.floor((usableHeight + labelGap) / (tallestItemHeight + labelGap)),
         )
-
+        const maxTrackCount = viewportWidth < 640 ? 2 : ANNOTATION_MAX_TRACKS_PER_SIDE
+        const trackCount = Math.min(
+          maxTrackCount,
+          Math.max(1, Math.ceil(items.length / singleTrackCapacity)),
+        )
+        const tracks = Array.from({ length: trackCount }, () => [] as typeof items)
         items.forEach((item, index) => {
-          const labelLeft =
-            side === "left"
-              ? sidePadding
-              : viewportWidth - sidePadding - item.width
-          const labelTop = tops[index]
-          const labelCenterY = labelTop + item.height * 0.5
-          const labelEdgeX =
-            side === "left" ? labelLeft + item.width : labelLeft
-          const elbowX =
-            side === "left"
-              ? Math.max(labelEdgeX + 12, item.screenX - 34)
-              : Math.min(labelEdgeX - 12, item.screenX + 34)
+          tracks[index % trackCount].push(item)
+        })
 
-          item.annotation.labelEl.style.opacity = "1"
-          item.annotation.labelEl.style.transform = `translate(${labelLeft}px, ${labelTop}px)`
+        const maxLabelWidth = Math.max(...items.map((item) => item.width))
 
-          item.annotation.lineEl.style.display = "block"
-          item.annotation.lineEl.setAttribute(
-            "points",
-            `${item.screenX},${item.screenY} ${item.screenX},${labelCenterY} ${elbowX},${labelCenterY} ${labelEdgeX},${labelCenterY}`,
+        tracks.forEach((trackItems, trackIndex) => {
+          const tops = distributeLabelTops(
+            trackItems.map((item) => ({
+              desiredTop: item.screenY - item.height * 0.5,
+              height: item.height,
+            })),
+            safeTop,
+            safeBottom,
+            labelGap,
           )
 
-          item.annotation.dotEl.style.display = "block"
-          item.annotation.dotEl.setAttribute("cx", item.screenX.toFixed(2))
-          item.annotation.dotEl.setAttribute("cy", item.screenY.toFixed(2))
+          trackItems.forEach((item, index) => {
+            const trackOffset = trackIndex * (maxLabelWidth + ANNOTATION_TRACK_GAP)
+            const labelLeft =
+              side === "left"
+                ? sidePadding + trackOffset
+                : viewportWidth - sidePadding - item.width - trackOffset
+            const labelTop = tops[index]
+            const labelCenterY = labelTop + item.height * 0.5
+            const labelEdgeX =
+              side === "left" ? labelLeft + item.width : labelLeft
+            const elbowX =
+              side === "left"
+                ? Math.min(item.screenX - 18, labelEdgeX + 18 + trackIndex * 10)
+                : Math.max(item.screenX + 18, labelEdgeX - 18 - trackIndex * 10)
+
+            item.annotation.labelEl.style.opacity = "1"
+            item.annotation.labelEl.style.transform = `translate(${labelLeft}px, ${labelTop}px)`
+
+            item.annotation.lineEl.style.display = "block"
+            item.annotation.lineEl.setAttribute(
+              "points",
+              `${item.screenX},${item.screenY} ${item.screenX},${labelCenterY} ${elbowX},${labelCenterY} ${labelEdgeX},${labelCenterY}`,
+            )
+
+            item.annotation.dotEl.style.display = "block"
+            item.annotation.dotEl.setAttribute("cx", item.screenX.toFixed(2))
+            item.annotation.dotEl.setAttribute("cy", item.screenY.toFixed(2))
+          })
         })
       }
 
@@ -695,6 +756,7 @@ export default function ModelViewerPage() {
         pointB.intensity = 0.42 + Math.sin(elapsed * 0.9 + 1.5) * 0.08
 
         controls?.update()
+        updateAxisOverlay(camera)
         nextRenderer.render(scene, camera)
         layoutAnnotations(camera)
       })
@@ -788,6 +850,39 @@ export default function ModelViewerPage() {
       }}
     >
       <div ref={mountRef} style={{ width: "100%", height: "100%" }} />
+
+      <svg
+        ref={axisSvgRef}
+        aria-label="XYZ positive axis indicator"
+        viewBox="0 0 92 92"
+        style={{
+          position: "absolute",
+          right: 12,
+          bottom: 12,
+          width: 58,
+          height: 58,
+          pointerEvents: "none",
+        }}
+      >
+        <defs>
+          <marker id="axis-arrow-x" markerWidth="4" markerHeight="4" refX="3.6" refY="2" orient="auto">
+            <path d="M0,0 L4,2 L0,4 Z" fill="#ff5f68" />
+          </marker>
+          <marker id="axis-arrow-y" markerWidth="4" markerHeight="4" refX="3.6" refY="2" orient="auto">
+            <path d="M0,0 L4,2 L0,4 Z" fill="#6ee77f" />
+          </marker>
+          <marker id="axis-arrow-z" markerWidth="4" markerHeight="4" refX="3.6" refY="2" orient="auto">
+            <path d="M0,0 L4,2 L0,4 Z" fill="#6ba8ff" />
+          </marker>
+        </defs>
+        <circle cx="28" cy="62" r="3.2" fill="rgba(231, 238, 255, 0.88)" />
+        <line data-axis-line="x" x1="28" y1="62" x2="58" y2="62" stroke="#ff5f68" strokeWidth="3" strokeLinecap="round" markerEnd="url(#axis-arrow-x)" />
+        <line data-axis-line="y" x1="28" y1="62" x2="8" y2="82" stroke="#6ee77f" strokeWidth="3" strokeLinecap="round" markerEnd="url(#axis-arrow-y)" />
+        <line data-axis-line="z" x1="28" y1="62" x2="28" y2="28" stroke="#6ba8ff" strokeWidth="3" strokeLinecap="round" markerEnd="url(#axis-arrow-z)" />
+        <text data-axis-label="x" x="66" y="65" fill="#ff8b91" fontFamily="IBM Plex Mono, Consolas, monospace" fontSize="12" fontWeight="700" textAnchor="middle">X</text>
+        <text data-axis-label="y" x="1" y="90" fill="#8cf49a" fontFamily="IBM Plex Mono, Consolas, monospace" fontSize="12" fontWeight="700" textAnchor="middle">Y</text>
+        <text data-axis-label="z" x="28" y="18" fill="#8fbdff" fontFamily="IBM Plex Mono, Consolas, monospace" fontSize="12" fontWeight="700" textAnchor="middle">Z</text>
+      </svg>
 
       <div
         style={{

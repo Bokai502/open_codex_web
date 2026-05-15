@@ -8,6 +8,13 @@ export interface Skill {
   description: string
 }
 
+export interface SkillInstruction {
+  name: string
+  description: string
+  file: string
+  content: string
+}
+
 const SKILLS_DIR = path.join(os.homedir(), ".codex", "skills")
 const CACHE_FILE = path.resolve(process.cwd(), "skills.json")
 
@@ -92,6 +99,47 @@ export function scanSkills(): Skill[] {
 
   deduped.sort((a, b) => a.name.localeCompare(b.name))
   return deduped
+}
+
+export function readSkillInstructions(skillNames: string[]): SkillInstruction[] {
+  if (!fs.existsSync(SKILLS_DIR) || skillNames.length === 0) return []
+
+  const requested = new Set(
+    skillNames
+      .map(name => name.trim().toLowerCase())
+      .filter(Boolean)
+  )
+  if (requested.size === 0) return []
+
+  const found: { file: string; dirName: string }[] = []
+  findSkillFiles(SKILLS_DIR, 0, found)
+
+  const instructions: SkillInstruction[] = []
+  const seen = new Set<string>()
+
+  for (const { file, dirName } of found) {
+    try {
+      const content = fs.readFileSync(file, "utf-8")
+      const fm = parseFrontmatter(content)
+      const name = fm.name || dirName
+      const key = name.toLowerCase()
+
+      if (!requested.has(key) || seen.has(key)) continue
+      seen.add(key)
+
+      instructions.push({
+        name,
+        description: fm.description || "",
+        file,
+        content,
+      })
+    } catch {
+      // 读取失败的 skill 跳过，不阻断整体运行
+    }
+  }
+
+  instructions.sort((a, b) => a.name.localeCompare(b.name))
+  return instructions
 }
 
 export function refreshSkillsCache(logger: Logger): Skill[] {
